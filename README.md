@@ -1,12 +1,12 @@
 # zweig
 
-**Smart, safe, minimal CLI for Git worktree lifecycle management.**
+**Smart**, **safe**, **minimal** CLI for Git worktree lifecycle management.
 Invoked via: `zg`
 
 ## 🌱 Why zweig?
 
 `git worktree` is powerful but painful.
-**zweig** (German for *twig*) is a hardened Bash CLI that wraps worktree workflows into clean, safe, automation-ready commands.
+**zweig** (German for *twig*) is a hardened Bash CLI that wraps `git worktree` workflows into clean, safe, automation-ready commands.
 
 ## 🚀 Features
 
@@ -25,6 +25,8 @@ curl -sSL https://raw.githubusercontent.com/<your-username>/zweig/main/install.s
 ## 💻 Usage
 
 ```bash
+Zweig CLI (alias: zg)
+
 zg create <branch>          # Create branch + worktree
 zg from <branch>            # Create worktree from existing branch
 zg remove <branch> (rm)     # Remove worktree, keep branch
@@ -57,3 +59,7 @@ zg help
 ✨ Uses Conventional Commits
 🔁 Fully automated via GitHub Actions + `semantic-release`
 🆕 Changelog and GitHub release notes generated from commits
+
+## Want to contribute?
+
+See [contributing guidelines](./CONTRIBUTING.md).
