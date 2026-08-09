@@ -191,11 +191,16 @@ zg_maintenance_sync_tree() {
 
 
 # --- Migrate all existing branches into worktrees ---
+# Branch names are flattened (/ -> __) for the worktree directory name, so a
+# branch like "feature/foo" lands at "$ZWEIG_WORKTREE_DIR/feature__foo" rather
+# than creating a nested "feature/foo" directory.
 zg_maintenance_migrate() {
     echo "🚚 Migrating branches to worktrees..."
 
+    local branch dir_name dir
     for branch in $(git for-each-ref --format='%(refname:short)' refs/heads/ | grep -vE "^($ZWEIG_DEFAULT_BRANCH|HEAD)"); do
-        dir="$ZWEIG_WORKTREE_DIR/$branch"
+        dir_name="${branch//\//__}"
+        dir="$ZWEIG_WORKTREE_DIR/$dir_name"
         if [[ -d "$dir" ]]; then
             echo "⏭️ Already exists: $branch"
         else
