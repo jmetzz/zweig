@@ -1,0 +1,25 @@
+# .github/workflows/commitlint.yml
+name: Conventional Commits (PR commits)
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+jobs:
+  commitlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # needed to read commit range
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - run: npm i -D @commitlint/cli @commitlint/config-conventional
+
+      - name: Lint all commits in the PR
+        run: |
+          FROM_SHA="${{ github.event.pull_request.base.sha }}"
+          TO_SHA="${{ github.event.pull_request.head.sha }}"
+          npx commitlint --from "$FROM_SHA" --to "$TO_SHA" -x @commitlint/config-conventional
