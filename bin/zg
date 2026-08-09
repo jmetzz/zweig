@@ -1,11 +1,30 @@
 #!/usr/bin/env bash
 # Entrypoint for Zweig CLI
 
-# Resolve ZWEIG_ROOT relative to this script if not provided
+# Resolve ZWEIG_ROOT relative to this script's real location, following symlinks.
+# install.sh symlinks this file into $BIN_DIR, which differs from the actual
+# install root, so a plain BASH_SOURCE dirname is not enough (readlink -f is not
+# portable to BSD/macOS readlink, hence the manual loop).
 if [[ -z "${ZWEIG_ROOT:-}" ]]; then
-  ZWEIG_ROOT="$(cd -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  _zg_src="${BASH_SOURCE[0]}"
+  while [[ -L "$_zg_src" ]]; do
+    _zg_dir="$(cd -P -- "$(dirname -- "$_zg_src")" && pwd)"
+    _zg_src="$(readlink -- "$_zg_src")"
+    [[ "$_zg_src" != /* ]] && _zg_src="$_zg_dir/$_zg_src"
+  done
+  ZWEIG_ROOT="$(cd -P -- "$(dirname -- "$_zg_src")/.." && pwd)"
+  unset _zg_src _zg_dir
 fi
 export ZWEIG_ROOT
+
+# Fail loudly instead of falling through to "zg $@" below: with no loader.sh,
+# the zg() function never gets defined, and a bare "zg" call would then resolve
+# back through PATH to this same script, recursing until the OS refuses to fork.
+if [[ ! -f "$ZWEIG_ROOT/modules/loader.sh" ]]; then
+  echo "❌ Zweig installation looks broken: $ZWEIG_ROOT/modules/loader.sh not found." >&2
+  echo "   ZWEIG_ROOT resolved to: $ZWEIG_ROOT" >&2
+  exit 1
+fi
 
 # Shell strictness is set inside the sourced modules
 # (each module does set -euo pipefail)
