@@ -1,65 +1,145 @@
 # zweig
 
 **Smart**, **safe**, **minimal** CLI for Git worktree lifecycle management.
-Invoked via: `zg`
+
+> Invoked via: `zg`
 
 ## 🌱 Why zweig?
 
-`git worktree` is powerful but painful.
-**zweig** (German for *twig*) is a hardened Bash CLI that wraps `git worktree` workflows into clean, safe, automation-ready commands.
+Managing `git worktree` is powerful but painful.
+**zweig** (German for *twig*) is a hardened Bash CLI that abstracts the low-level commands and wraps `git worktree` workflows into clean, safe, lifecycle-aware, and automation-ready workflows.
 
 ## 🚀 Features
 
-- 🔒 Automation-safe: no accidental deletions
-- 🔁 Lifecycle aware: archive, finalize, rebuild
-- ⚙️ Modular Bash: core + optional extensions (`gh`, `fzf`)
+- 🔁 Lifecycle aware: create, navigate, finalize, rebuild, protect, sync, and clean
 - 📦 One-line install
+- 🔒 Automation-safe: no accidental deletions
+- ⚙️ Modular Bash codebase: core + optional extensions (`gh`, `fzf`)
+- 🪶 Lightweight: pure shell + Git only (no exotic dependencies for core functionalities)
 - 🪴 Built with trunk-based dev + semantic releases
+
+## Dependencies
+
+- ❗ Requires `Bash` 4+
+- ❗ Requires `Git`
+
+## ⚙️ Configuration
+
+You can configure `zweig` behavior using the following environment variables.
+To override the defaults, you must export these variables manually in your shell rc file (e.g., `.bashrc`, `.zshrc`):
+
+- `ZWEIG_WORKTREE_DIR`: Specifies the base directory where worktrees are created.
+    Default: `$HOME/.worktrees`
+- `ZWEIG_DEFAULT_BRANCH`: Sets the default main branch name for operations (e.g., `create`, `sync`).
+    Default: `main`
+- `ZWEIG_DEFAULT_SYNC_SCOPE`: Defines the default scope for `zg sync` if no argument is provided.
+    Default: `current`
 
 ## 📥 Install
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/<your-username>/zweig/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jmetzz/zweig/main/install.sh | sh
 ```
+
+*Note:* After installation, make sure that `~/.local/bin` is included in your `PATH` environment variable if it is not already.
+
+## 🐳 Docker Usage
+
+You can use the provided `Dockerfile` to create a containerized environment for testing the `zweig` CLI. This simulates an end-user installation.
+
+1. **Build the Docker image:**
+    Navigate to the project's root directory and run:
+
+    ```bash
+    docker build -t zweig-e2e .
+    ```
+
+2. **Run a container from the image:**
+    This will give you an interactive Bash shell inside the container where `zweig` is installed.
+
+    ```bash
+    docker run -it zweig-e2e
+    ```
+
+3. **Test the `zg` command inside the container:**
+
+    ```bash
+    root@<container_id>:/app# zg help
+    root@<container_id>:/app# zg list
+    root@<container_id>:/app# zg create my-test-worktree
+    ```
+
+### Interactive Testing
+
+To perform a more comprehensive interactive test of all `zg` commands, follow these steps:
+
+1. **Run an interactive shell in the Docker container:**
+
+    ```bash
+    docker run -it -v ~/.gitconfig:/root/.gitconfig zweig-e2e
+    ```
+
+2. **Inside the container, test the `zg` commands:**
+    You will be at a Bash prompt (`root@<container_id>:/app#`). You can then execute `zg` commands.
+
+    - **Example: Basic commands**
+
+        ```bash
+        root@<container_id>:/app# zg help
+        root@<container_id>:/app# zg list
+        root@<container_id>:/app# zg version
+        ```
+
+    - **Example: Commands requiring a Git repository**
+        For commands like `zg create`, `zg remove`, `zg sync`, etc., you'll need to initialize a Git repository first.
+
+        ```bash
+        root@<container_id>:/app# mkdir my_test_repo
+        root@<container_id>:/app# cd my_test_repo
+        root@<container_id>:/app/my_test_repo# git init
+        root@<container_id>:/app/my_test_repo# git config user.email "test@example.com"
+        root@<container_id>:/app/my_test_repo# git config user.name "Test User"
+        root@<container_id>:/app/my_test_repo# touch README.md
+        root@<container_id>:/app/my_test_repo# git add README.md
+        root@<container_id>:/app/my_test_repo# git commit -m "Initial commit"
+        ```
+
+        Now you can try commands like:
+
+        ```bash
+        root@<container_id>:/app/my_test_repo# zg create feature/my-new-feature
+        root@<container_id>:/app/my_test_repo# zg list
+        root@<container_id>:/app/my_test_repo# zg switch feature/my-new-feature
+        ```
+
+    - **Exit the container:**
+        Type `exit` or press `Ctrl+D`.
 
 ## 💻 Usage
 
-```bash
-Zweig CLI (alias: zg)
+For a full list of commands and their usage, run `zg help`.
 
-zg create <branch>          # Create branch + worktree
-zg from <branch>            # Create worktree from existing branch
-zg remove <branch> (rm)     # Remove worktree, keep branch
-zg switch <branch>          # Enter worktree
-zg list                     # List worktrees
+Here are some examples of conversational API usage:
 
+- Sync all worktrees:
 
-Lifecycle
-zg finalize <branch>
-zg rebuild <branch>
-zg archive <branch>
-zg protect <branch>
-zg unprotect <branch>
+  ```bash
+  zg sync all
+  ```
 
-Maintenance
-zg prune-metadata
-zg remove-merged
-zg remove-deleted-remote
-zg sync
-zg status
-zg migrate
+- Create a worktree from a pull request number:
 
-Meta
-zg main
-zg help
-```
+  ```bash
+  zg create from-pr 42
+  ```
 
 ## 🧪 Release Process
 
 ✨ Uses Conventional Commits
 🔁 Fully automated via GitHub Actions + `semantic-release`
 🆕 Changelog and GitHub release notes generated from commits
+*Note:* The `CHANGELOG.md` file is updated automatically during each release.
 
 ## Want to contribute?
 
-See [contributing guidelines](./CONTRIBUTING.md).
+See [contributing guidelines](./docs/CONTRIBUTING.md).
