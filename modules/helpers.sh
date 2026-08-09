@@ -111,6 +111,8 @@ Worktree Core Lifecycle:
   zg create <worktree name>         Create a new worktree (and local branch) from the default branch.
   zg create from <branch>           Create a worktree from an existing branch.
   zg create from-pr <pr-id>         Create worktree from GitHub PR (requires gh).
+  zg create ... -s                  Add -s to any create form to switch into it immediately
+                                     (requires the shell shim; see shims/shims.sh).
   zg (remove|rm) <worktree>         Remove a worktree but keeps the branch.
   zg remove merged                  Remove worktrees whose branches are merged into the default branch.
   zg (switch|cd) <worktree|branch>  Enter a worktree or switch to one by branch name.

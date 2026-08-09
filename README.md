@@ -135,6 +135,12 @@ Here are some examples of conversational API usage:
   zg create from-pr 42
   ```
 
+- Create a worktree and switch into it in one step (requires the shell shim):
+
+  ```bash
+  zg create -s my-feature
+  ```
+
 ## 🧪 Release Process
 
 ✨ Uses Conventional Commits
