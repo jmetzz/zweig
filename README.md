@@ -34,6 +34,8 @@ To override the defaults, you must export these variables manually in your shell
     Default: `main`
 - `ZWEIG_DEFAULT_SYNC_SCOPE`: Defines the default scope for `zg sync` if no argument is provided.
     Default: `current`
+- `ZWEIG_COPY_ON_CREATE`: Space-separated list of local files/directories (relative to the repo root) copied into every newly created worktree, when present in the source and absent in the target. Never overwrites.
+    Default: `.env .env.local .env.development .env.test .env.production AGENTS.md CLAUDE.md GEMINI.md .claude .cursor .codex .antigravity`
 
 ## 📥 Install
 

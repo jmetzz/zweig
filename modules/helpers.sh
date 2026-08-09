@@ -61,6 +61,33 @@ zg_helpers_is_protected() {
     [[ -f "$ZWEIG_WORKTREE_DIR/$wtree/.protected" ]]
 }
 
+# --- Seed a newly created worktree with local, usually-gitignored context files ---
+# Copies each entry in ZWEIG_COPY_ON_CREATE (space-separated, relative to the repo
+# root) from the control repo root into the new worktree, when present in the
+# source and absent in the target. Never overwrites. Files and directories both work.
+zg_helpers_seed_worktree() {
+    local target_dir="$1"
+    local root_dir="$2"
+    local entry src dst
+
+    for entry in $ZWEIG_COPY_ON_CREATE; do
+        src="$root_dir/$entry"
+        dst="$target_dir/$entry"
+
+        [[ -e "$src" ]] || continue
+        [[ -e "$dst" ]] && continue
+
+        mkdir -p "$(dirname "$dst")"
+        if cp -R "$src" "$dst"; then
+            echo "📋 Copied $entry into worktree"
+        else
+            echo "⚠️  Failed to copy $entry into worktree" >&2
+        fi
+    done
+
+    return 0
+}
+
 # --- Determine version from package.json ---
 zg_helpers_version() {
     local version

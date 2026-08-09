@@ -65,6 +65,10 @@ zg_extensions_from_pr() {
         return 1
     fi
 
+    local root_dir
+    root_dir="$(zg__control_root)" || root_dir="$(git rev-parse --show-toplevel)"
+    zg_helpers_seed_worktree "$ZWEIG_WORKTREE_DIR/$pr_id" "$root_dir"
+
     echo "✅ Worktree created from PR #$pr_id ($branch)"
     zg_core_switch "$pr_id"
 }

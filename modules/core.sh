@@ -40,6 +40,9 @@ zg_core_create() {
   # Try to refresh remotes (no-op if no origin)
   zg_helpers_fetch_origin || return 1
 
+  local root_dir
+  root_dir="$(zg__control_root)" || root_dir="$(git rev-parse --show-toplevel)"
+
   # Decide base: prefer origin/<default>, then local <default>, else current HEAD
   local base=""
   if git show-ref --verify --quiet "refs/remotes/origin/$ZWEIG_DEFAULT_BRANCH"; then
@@ -53,11 +56,13 @@ zg_core_create() {
   # Create worktree and new branch from decided base
   if [[ -n "$base" ]]; then
     if git worktree add "$ZWEIG_WORKTREE_DIR/$wtree" -b "$wtree" "$base"; then
+      zg_helpers_seed_worktree "$ZWEIG_WORKTREE_DIR/$wtree" "$root_dir"
       echo "🌱 Created new branch + worktree: $wtree (from $base)"
       return 0
     fi
   else
     if git worktree add "$ZWEIG_WORKTREE_DIR/$wtree" -b "$wtree"; then
+      zg_helpers_seed_worktree "$ZWEIG_WORKTREE_DIR/$wtree" "$root_dir"
       echo "🌱 Created new branch + worktree: $wtree (from HEAD)"
       return 0
     fi
@@ -100,12 +105,16 @@ zg_core_create_from() {
     # Refresh remote refs consistently
     zg_helpers_fetch_origin || return 1
 
+    local root_dir
+    root_dir="$(zg__control_root)" || root_dir="$(git rev-parse --show-toplevel)"
+
     if git show-ref --verify --quiet "refs/heads/$branch"; then
         echo "🌿 Creating worktree from local branch: $branch"
         git worktree add "$ZWEIG_WORKTREE_DIR/$branch" "$branch" || {
             echo "❌ Error: Failed to add worktree for local branch '$branch'." >&2
             return 1
         }
+        zg_helpers_seed_worktree "$ZWEIG_WORKTREE_DIR/$branch" "$root_dir"
         echo "✅ Created worktree for branch: $branch"
         return 0
     fi
@@ -121,6 +130,7 @@ zg_core_create_from() {
             echo "❌ Error: Failed to add worktree for '$branch'." >&2
             return 1
         }
+        zg_helpers_seed_worktree "$ZWEIG_WORKTREE_DIR/$branch" "$root_dir"
         echo "✅ Created worktree for branch: $branch"
         return 0
     fi

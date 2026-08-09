@@ -7,6 +7,10 @@ export ZWEIG_ROOT
 export ZWEIG_DEFAULT_BRANCH="${ZWEIG_DEFAULT_BRANCH:-main}"
 export ZWEIG_DEFAULT_SYNC_SCOPE="${ZWEIG_DEFAULT_SYNC_SCOPE:-current}"
 
+# Local (usually gitignored) files/dirs copied into every newly created worktree,
+# relative to the repo root. Space-separated; override to add or drop entries.
+export ZWEIG_COPY_ON_CREATE="${ZWEIG_COPY_ON_CREATE:-.env .env.local .env.development .env.test .env.production AGENTS.md CLAUDE.md GEMINI.md .claude .cursor .codex .antigravity}"
+
 # --- Resolve the control repo root (works from inside a linked worktree too) ---
 # Uses git-common-dir, which always points at the main repo's .git, so the same
 # root (and thus the same worktree dir) resolves no matter which worktree you're in.
