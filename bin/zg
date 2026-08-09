@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Entrypoint for Zweig CLI
+
+# Resolve ZWEIG_ROOT relative to this script if not provided
+if [[ -z "${ZWEIG_ROOT:-}" ]]; then
+  ZWEIG_ROOT="$(cd -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+fi
+export ZWEIG_ROOT
+
+# Shell strictness is set inside the sourced modules
+# (each module does set -euo pipefail)
+# shellcheck disable=SC1091
+source "$ZWEIG_ROOT/modules/loader.sh"
+
+zg "$@"
