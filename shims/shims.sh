@@ -15,22 +15,27 @@ zg() {
     fi
     cd "$dir" || return
   elif [[ "$1" == "create" ]]; then
+    # This file is sourced as-is by both bash and zsh, and zsh's arrays are
+    # 1-indexed by default (unlike bash's 0-indexed ones), so array indexing
+    # here is deliberately avoided in favor of tracking the last positional
+    # arg as we go - that works identically in either shell.
     shift
     local switch_after="false"
     local args=()
+    local target=""
     local arg
     for arg in "$@"; do
       if [[ "$arg" == "-s" ]]; then
         switch_after="true"
       else
         args+=("$arg")
+        target="$arg"
       fi
     done
 
     command zg create "${args[@]}" || return $?
 
-    if [[ "$switch_after" == "true" && ${#args[@]} -gt 0 ]]; then
-      local target="${args[$(( ${#args[@]} - 1 ))]}"
+    if [[ "$switch_after" == "true" && -n "$target" ]]; then
       local dir
       if dir="$(command zg path "$target")"; then
         cd "$dir" || return
