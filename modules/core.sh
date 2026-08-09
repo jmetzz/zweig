@@ -11,9 +11,11 @@ zg_core_main() {
 }
 
 # --- Navigate back to project root ---
+# Resolves the control repo root, not just the current worktree's own top level,
+# so this works correctly even when called from inside a linked worktree.
 zg_core_root() {
     local root_dir
-    root_dir=$(git rev-parse --show-toplevel)
+    root_dir="$(zg__control_root)" || root_dir="$(git rev-parse --show-toplevel)"
     cd "$root_dir" || return
     echo "📂 Switched to project root: $root_dir"
 }
