@@ -29,7 +29,7 @@ You can configure `zweig` behavior using the following environment variables.
 To override the defaults, you must export these variables manually in your shell rc file (e.g., `.bashrc`, `.zshrc`):
 
 - `ZWEIG_WORKTREE_DIR`: Specifies the base directory where worktrees are created.
-    Default: `$HOME/.worktrees`
+    Default: `<repo-root>/.worktrees`, resolved per repository (same directory whether you're in the main checkout or an existing worktree). Falls back to `$HOME/.worktrees` when run outside a Git repository.
 - `ZWEIG_DEFAULT_BRANCH`: Sets the default main branch name for operations (e.g., `create`, `sync`).
     Default: `main`
 - `ZWEIG_DEFAULT_SYNC_SCOPE`: Defines the default scope for `zg sync` if no argument is provided.

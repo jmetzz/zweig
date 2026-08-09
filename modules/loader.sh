@@ -4,10 +4,35 @@ set -euo pipefail
 # --- Detect Zweig Root ---
 ZWEIG_ROOT="$(cd -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export ZWEIG_ROOT
-export ZWEIG_WORKTREE_DIR="${ZWEIG_WORKTREE_DIR:-$HOME/.worktrees}"
-mkdir -p "$ZWEIG_WORKTREE_DIR"
 export ZWEIG_DEFAULT_BRANCH="${ZWEIG_DEFAULT_BRANCH:-main}"
 export ZWEIG_DEFAULT_SYNC_SCOPE="${ZWEIG_DEFAULT_SYNC_SCOPE:-current}"
+
+# --- Resolve the control repo root (works from inside a linked worktree too) ---
+# Uses git-common-dir, which always points at the main repo's .git, so the same
+# root (and thus the same worktree dir) resolves no matter which worktree you're in.
+zg__control_root() {
+  local git_common_dir toplevel abs
+  git_common_dir="$(git rev-parse --git-common-dir 2>/dev/null)" || return 1
+  toplevel="$(git rev-parse --show-toplevel 2>/dev/null)" || return 1
+  if [[ "$git_common_dir" == /* ]]; then
+    abs="$git_common_dir"
+  else
+    abs="$toplevel/$git_common_dir"
+  fi
+  (cd "$abs/.." && pwd)
+}
+
+# --- Worktree directory: repo-local by default, override wins, $HOME as last resort ---
+if [[ -n "${ZWEIG_WORKTREE_DIR:-}" ]]; then
+  : # explicit override wins
+elif _zg_control_root="$(zg__control_root)"; then
+  ZWEIG_WORKTREE_DIR="$_zg_control_root/.worktrees"
+else
+  ZWEIG_WORKTREE_DIR="$HOME/.worktrees"
+fi
+unset _zg_control_root
+export ZWEIG_WORKTREE_DIR
+mkdir -p "$ZWEIG_WORKTREE_DIR"
 
 # --- Aliases normalization ---
 zg__normalize_cmd() {
