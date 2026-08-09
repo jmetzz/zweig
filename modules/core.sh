@@ -327,20 +327,20 @@ zg_core_remove_merged() {
         local wtree; wtree="$(basename "$dir")"
 
         if zg_helpers_is_protected "$wtree"; then
-            echo "🛡️  Skipping protected: $wtree"; ((skipped++)); continue
+            echo "🛡️  Skipping protected: $wtree"; skipped=$((skipped + 1)); continue
         fi
 
         # Consider only branches that are fully merged into the default branch
         if git merge-base --is-ancestor "refs/heads/$wtree" "$base"; then
             echo "🔥 $wtree is merged into $base. Finalizing..."
             if zg_core_finalize "$wtree" --force; then
-                ((removed++))
+                removed=$((removed + 1))
             else
                 echo "❌ Failed to finalize $wtree" >&2
-                ((failed++))
+                failed=$((failed + 1))
             fi
         else
-            ((skipped++))
+            skipped=$((skipped + 1))
         fi
     done
     shopt -u nullglob
