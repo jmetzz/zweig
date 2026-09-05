@@ -144,6 +144,20 @@ Releases are fully automated using `semantic-release`. When a pull request is me
 └── README.md           # Project README
 ```
 
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live as GitHub issues on `jmetzz/zweig`, managed via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default canonical labels (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context layout: `CONTEXT.md` + `docs/adr/` at the repo root (neither exists yet; created lazily). See `docs/agents/domain.md`.
+
 ## Future Outlook
 
 * Optional features like `self-update`, shell completions, and `ci doctor`.
