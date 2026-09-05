@@ -10,11 +10,13 @@ set -e
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/jmetzz/zweig/main/install.sh | sh
 #   curl -fsSL https://raw.githubusercontent.com/jmetzz/zweig/main/install.sh | sh -s -- --tag v1.2.3
+#   ./install.sh --local .                     # install from a local clone, no network
 
 
 REPO="jmetzz/zweig"
 BRANCH="main"                 # default when no tag is provided
 TAG=""                        # optional; when set, overrides BRANCH
+LOCAL=""                      # optional; when set, install from this local clone instead of downloading
 ROOT="${ZWEIG_ROOT:-$HOME/.local/share/zweig}"
 BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
 DRY_RUN=0
@@ -28,10 +30,12 @@ need() { command -v "$1" >/dev/null 2>&1 || { err "missing dependency: $1"; exit
 
 usage() {
   cat <<EOF
-Usage: install.sh [--tag <vX.Y.Z>] [--root <dir>] [--bin-dir <dir>] [--force] [--dry-run] [--uninstall] [--write-rc]
+Usage: install.sh [--tag <vX.Y.Z>] [--local <path>] [--root <dir>] [--bin-dir <dir>] [--force] [--dry-run] [--uninstall] [--write-rc]
 
 Options:
   --tag <vX.Y.Z>   Install a specific release tag (default: latest from 'main' branch)
+  --local <path>   Install from a local git clone at <path> instead of downloading from GitHub.
+                    Packages HEAD's tracked files (git archive), so uncommitted changes are not included.
   --root <dir>     Install root (default: \$HOME/.local/share/zweig)
   --bin-dir <dir>  Symlink directory for 'zg' (default: \$HOME/.local/bin)
   --force          Overwrite existing installation for the chosen label
@@ -49,6 +53,7 @@ EOF
 while [ $# -gt 0 ]; do
   case "$1" in
     --tag)      [ $# -ge 2 ] || { err "--tag needs a value"; usage; exit 1; }; TAG="$2"; shift 2 ;;
+    --local)    [ $# -ge 2 ] || { err "--local needs a value"; usage; exit 1; }; LOCAL="$2"; shift 2 ;;
     --root)     [ $# -ge 2 ] || { err "--root needs a value"; usage; exit 1; }; ROOT="$2"; shift 2 ;;
     --bin-dir)  [ $# -ge 2 ] || { err "--bin-dir needs a value"; usage; exit 1; }; BIN_DIR="$2"; shift 2 ;;
     --force)    FORCE=1; shift ;;
@@ -60,12 +65,28 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-need curl
-need tar
+if [ -n "$TAG" ] && [ -n "$LOCAL" ]; then
+  err "--tag and --local are mutually exclusive"
+  exit 1
+fi
+
+if [ -n "$LOCAL" ]; then
+  need git
+  [ -d "$LOCAL/.git" ] || { err "--local path '$LOCAL' is not a git clone"; exit 1; }
+else
+  need curl
+  need tar
+fi
 mkdir -p "$BIN_DIR" "$ROOT/versions"
 
-# Compute label + download URL
-if [ -n "$TAG" ]; then
+# Compute label + source
+if [ -n "$LOCAL" ]; then
+  LOCAL_SHA="$(git -C "$LOCAL" rev-parse --short HEAD 2>/dev/null)" || { err "failed to resolve HEAD in '$LOCAL'"; exit 1; }
+  LABEL="local-$LOCAL_SHA"
+  if ! git -C "$LOCAL" diff --quiet 2>/dev/null || ! git -C "$LOCAL" diff --cached --quiet 2>/dev/null; then
+    log "Warning: '$LOCAL' has uncommitted changes; only the last commit ($LOCAL_SHA) will be installed."
+  fi
+elif [ -n "$TAG" ]; then
   LABEL="$TAG"
   URL="https://github.com/$REPO/archive/refs/tags/$TAG.tar.gz"
 else
@@ -87,7 +108,11 @@ fi
 
 # Dry-run summary
 if [ "$DRY_RUN" -eq 1 ]; then
-  log "[Dry Run] Would download: $URL"
+  if [ -n "$LOCAL" ]; then
+    log "[Dry Run] Would package HEAD ($LOCAL_SHA) from: $LOCAL"
+  else
+    log "[Dry Run] Would download: $URL"
+  fi
   log "[Dry Run] Would extract to: $DEST"
   log "[Dry Run] Would symlink: $LINK -> $DEST/bin/zg"
   log "[Dry Run] Would link shim to: $ROOT/shims/shims.sh (if present in archive)"
@@ -115,12 +140,19 @@ fi
 tmpdir="$(mktemp -d 2>/dev/null || mktemp -d -t zweig)"
 trap 'rm -rf "$tmpdir"' EXIT INT TERM
 
-log "Downloading $URL"
-curl -fsSL "$URL" | tar -xz -C "$tmpdir"
+if [ -n "$LOCAL" ]; then
+  log "Packaging HEAD ($LOCAL_SHA) from $LOCAL"
+  src_dir="$tmpdir/src"
+  mkdir -p "$src_dir"
+  git -C "$LOCAL" archive HEAD | tar -x -C "$src_dir"
+else
+  log "Downloading $URL"
+  curl -fsSL "$URL" | tar -xz -C "$tmpdir"
 
-# Move exploded dir to DEST (GitHub tarball creates a single top-level dir)
-src_dir="$(find "$tmpdir" -mindepth 1 -maxdepth 1 -type d | head -n1)"
-[ -n "$src_dir" ] || { err "download/extract failed"; exit 1; }
+  # Move exploded dir to DEST (GitHub tarball creates a single top-level dir)
+  src_dir="$(find "$tmpdir" -mindepth 1 -maxdepth 1 -type d | head -n1)"
+  [ -n "$src_dir" ] || { err "download/extract failed"; exit 1; }
+fi
 
 if [ -d "$DEST" ]; then
   rm -rf "$DEST"
