@@ -11,6 +11,11 @@ zg_extensions_select() {
         return 1
     fi
 
+    if [[ ! -d "$ZWEIG_WORKTREE_DIR" ]]; then
+        echo "❌ No worktrees found in $ZWEIG_WORKTREE_DIR"
+        return 1
+    fi
+
     local selected
     selected=$(find "$ZWEIG_WORKTREE_DIR" -maxdepth 1 -mindepth 1 -type d | sed "s|$ZWEIG_WORKTREE_DIR/||" | fzf)
     if [[ -n "$selected" ]]; then
