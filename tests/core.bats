@@ -209,3 +209,85 @@ realdir() { (cd "$1" && pwd -P); }
     [ "$status" -eq 0 ]
     [[ "${lines[${#lines[@]}-1]}" == "$(realdir "$TEST_ROOT/elsewhere/ext")" ]]
 }
+
+@test "zg remove removes a worktree created outside the zg worktree dir by branch" {
+    make_repo
+    git worktree add -q "$TEST_ROOT/elsewhere/ext" -b ext-branch
+    run "$ZG" remove ext-branch --force
+    [ "$status" -eq 0 ]
+    [ ! -e "$TEST_ROOT/elsewhere/ext" ]
+    git show-ref --verify --quiet refs/heads/ext-branch
+}
+
+@test "zg protect blocks removing an outside worktree until zg unprotect" {
+    make_repo
+    git worktree add -q "$TEST_ROOT/elsewhere/ext" -b ext-branch
+    run "$ZG" protect ext-branch
+    [ "$status" -eq 0 ]
+    run bash -c 'echo y | "$1" remove ext-branch' _ "$ZG"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"is protected"* ]]
+    [ -d "$TEST_ROOT/elsewhere/ext" ]
+    run "$ZG" unprotect ext-branch
+    [ "$status" -eq 0 ]
+    run bash -c 'echo y | "$1" remove ext-branch' _ "$ZG"
+    [ "$status" -eq 0 ]
+    [ ! -e "$TEST_ROOT/elsewhere/ext" ]
+}
+
+@test "zg finalize removes an outside worktree and deletes its merged branch" {
+    make_repo
+    git worktree add -q "$TEST_ROOT/elsewhere/ext" -b ext-branch
+    run "$ZG" finalize ext-branch --force
+    [ "$status" -eq 0 ]
+    [ ! -e "$TEST_ROOT/elsewhere/ext" ]
+    ! git show-ref --verify --quiet refs/heads/ext-branch
+}
+
+@test "zg rebuild recreates an outside worktree at its original path" {
+    make_repo
+    git worktree add -q "$TEST_ROOT/elsewhere/ext" -b ext-branch
+    touch "$TEST_ROOT/elsewhere/ext/stale-file"
+    run "$ZG" rebuild ext-branch --force
+    [ "$status" -eq 0 ]
+    [ ! -e "$TEST_ROOT/elsewhere/ext/stale-file" ]
+    [ "$(git -C "$TEST_ROOT/elsewhere/ext" branch --show-current)" = "ext-branch" ]
+    [ ! -e "$REPO/.worktrees/ext-branch" ]
+}
+
+@test "zg remove still removes a zg-created worktree and keeps its branch" {
+    make_repo
+    "$ZG" create foo >/dev/null
+    run bash -c 'echo y | "$1" remove foo' _ "$ZG"
+    [ "$status" -eq 0 ]
+    [ ! -e "$REPO/.worktrees/foo" ]
+    git show-ref --verify --quiet refs/heads/foo
+}
+
+@test "zg finalize by directory name deletes the branch checked out there" {
+    make_repo
+    git worktree add -q "$REPO/.worktrees/feature__foo" -b feature/foo
+    run "$ZG" finalize feature__foo --force
+    [ "$status" -eq 0 ]
+    [ ! -e "$REPO/.worktrees/feature__foo" ]
+    ! git show-ref --verify --quiet refs/heads/feature/foo
+}
+
+@test "zg finalize refuses a protected outside worktree without --force" {
+    make_repo
+    git worktree add -q "$TEST_ROOT/elsewhere/ext" -b ext-branch
+    "$ZG" protect ext-branch >/dev/null
+    run bash -c 'echo y | "$1" finalize ext-branch' _ "$ZG"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"is protected"* ]]
+    [ -d "$TEST_ROOT/elsewhere/ext" ]
+}
+
+@test "zg rebuild refuses a detached worktree and leaves it in place" {
+    make_repo
+    git worktree add -q --detach "$REPO/.worktrees/detached"
+    run "$ZG" rebuild detached --force
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"detached HEAD"* ]]
+    [ -d "$REPO/.worktrees/detached" ]
+}

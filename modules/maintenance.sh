@@ -220,11 +220,12 @@ zg_maintenance_protect() {
         echo "❌ Error: Missing worktree name"
         return 1
     fi
-    if ! zg_helpers_worktree_exists "$wtree"; then
-        echo "❌ Worktree '$wtree' not found."; return 1
+    local dir
+    if ! dir="$(zg_helpers_resolve_worktree "$wtree")"; then
+        zg_helpers_report_worktree_not_found "$wtree"; return 1
     fi
 
-    touch "$ZWEIG_WORKTREE_DIR/$wtree/.protected"
+    touch "$dir/.protected"
     echo "🔐 Protected worktree: $wtree"
 }
 
@@ -234,9 +235,10 @@ zg_maintenance_unprotect() {
     if [[ -z "$wtree" ]]; then
         echo "❌ Error: Missing worktree name"; return 1
     fi
-    if ! zg_helpers_worktree_exists "$wtree"; then
-        echo "❌ Worktree '$wtree' not found."; return 1
+    local dir
+    if ! dir="$(zg_helpers_resolve_worktree "$wtree")"; then
+        zg_helpers_report_worktree_not_found "$wtree"; return 1
     fi
-    rm -f "$ZWEIG_WORKTREE_DIR/$wtree/.protected"
+    rm -f "$dir/.protected"
     echo "🔓 Unprotected worktree: $wtree"
 }
