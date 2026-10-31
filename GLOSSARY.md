@@ -9,5 +9,5 @@ The single main checkout that owns a repository's `.git` directory (as opposed t
 _Avoid_: main repo, root repo, primary checkout
 
 **Managed worktree**:
-Any git worktree `git worktree list` reports for the control repo — regardless of which tool created it or where on disk it lives (zg's own worktree directory, or a location another tool like Claude Code or Codex chose for itself). Every read/mutate command (`list`, `switch`, `remove`, `protect`, `prune`, `sync`, `status`, `finalize`) operates over all managed worktrees. (Target state: as of ADR 0001 only `list`, `switch` and `path` do; the rest follow in #4, #5 and #15.) Only `create` is opinionated about where a *new* one goes.
+Any git worktree `git worktree list` reports for the control repo — regardless of which tool created it or where on disk it lives (zg's own worktree directory, or a location another tool like Claude Code or Codex chose for itself). Every read/mutate command (`list`, `switch`, `remove`, `protect`, `prune`, `sync`, `status`, `finalize`) operates over all managed worktrees. (Target state: so far `list`, `switch`, `path`, `remove`, `protect`, `unprotect`, `finalize` and `rebuild` do; the rest follow in #5 and #15.) Only `create` is opinionated about where a *new* one goes.
 _Avoid_: zg worktree, tracked worktree

@@ -103,16 +103,25 @@ zg_helpers_report_worktree_not_found() {
     fi
 }
 
+# --- True if the current directory is the given directory or inside it ---
+# Compares physical paths, so symlinked prefixes (macOS /var) can't hide a match.
+zg_helpers_inside_dir() {
+    local dir here
+    dir="$(cd "$1" 2>/dev/null && pwd -P)" || return 1
+    here="$(pwd -P)"
+    [[ "$here" == "$dir" || "$here" == "$dir"/* ]]
+}
 
 # Internal helper to check if branch is protected
 zg_helpers_is_protected() {
-    local wtree="$1"
+    local wtree="$1" dir
     # Default branch is always protected
     if [[ "$wtree" == "$ZWEIG_DEFAULT_BRANCH" ]]; then
         return 0
     fi
-    # Or explicitly marked with a .protected file
-    [[ -f "$ZWEIG_WORKTREE_DIR/$wtree/.protected" ]]
+    # Or its worktree, wherever it lives, is marked with a .protected file
+    dir="$(zg_helpers_resolve_worktree "$wtree")" || return 1
+    [[ -f "$dir/.protected" ]]
 }
 
 # --- Seed a newly created worktree with local, usually-gitignored context files ---

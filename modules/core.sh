@@ -197,15 +197,14 @@ zg_core_remove() {
         return 1
     fi
 
-    local dir="$ZWEIG_WORKTREE_DIR/$wtree"
-    if [[ ! -d "$dir" ]]; then
-        echo "⚠️ Worktree does not exist: $dir"
+    local dir
+    if ! dir="$(zg_helpers_resolve_worktree "$wtree")"; then
+        zg_helpers_report_worktree_not_found "$wtree"
         return 1
     fi
 
     # Avoid operating inside the target worktree
-    local here; here="$(pwd -P)"
-    if [[ "$here" == "$dir"* ]]; then
+    if zg_helpers_inside_dir "$dir"; then
         echo "❌ You are inside the '$wtree' worktree. Switch away before removing." >&2
         return 1
     fi
@@ -310,8 +309,7 @@ zg_core_remove_merged() {
 }
 
 
-# --- Rebuild worktree (remove then re-add from same branch) ---
-# Assumes: worktree directory name == branch name
+# --- Rebuild worktree (remove then re-add the same branch at the same path) ---
 zg_core_rebuild() {
     local wtree="$1"
     local force="false"
@@ -322,24 +320,33 @@ zg_core_rebuild() {
     fi
     [[ ${2:-} == "--force" ]] && force="true"
 
-    local dir="$ZWEIG_WORKTREE_DIR/$wtree"
-    if [[ -d "$dir" ]]; then
-        # Don’t operate while inside the target worktree
-        local here; here="$(pwd -P)"
-        if [[ "$here" == "$dir"* ]]; then
-            echo "❌ You are inside the '$wtree' worktree. Switch away before rebuilding." >&2
-            return 1
-        fi
+    local dir branch
+    if ! dir="$(zg_helpers_resolve_worktree "$wtree")"; then
+        zg_helpers_report_worktree_not_found "$wtree"
+        return 1
+    fi
+    branch="$(git -C "$dir" branch --show-current)"
+    if [[ -z "$branch" ]]; then
+        echo "❌ Worktree '$wtree' has a detached HEAD; nothing to rebuild from." >&2
+        return 1
     fi
 
-    # Delegate validations and heavy lifting to existing commands
+    # Delegate validations (inside check, protection, prompt) to remove
     if [[ "$force" == "true" ]]; then
         zg_core_remove "$wtree" --force || return $?
     else
         zg_core_remove "$wtree" || return $?
     fi
+    # The prompt was declined: remove kept the worktree and returned 0.
+    [[ -d "$dir" ]] && return 0
 
-    zg_core_create_from "$wtree" || return $?
+    local root_dir
+    root_dir="$(zg__control_root)" || root_dir="$(git rev-parse --show-toplevel)"
+    git worktree add "$dir" "$branch" || {
+        echo "❌ Error: Failed to re-add worktree for '$branch' at $dir." >&2
+        return 1
+    }
+    zg_helpers_seed_worktree "$dir" "$root_dir"
 
     echo "🔧 Rebuilt worktree: $wtree"
 }
@@ -371,22 +378,25 @@ zg_core_finalize() {
     [[ "$REPLY" =~ ^[Yy]$ ]] || { echo "Operation cancelled."; return 0; }
   fi
 
-  local dir="$ZWEIG_WORKTREE_DIR/$branch"
-
-  # Avoid operating inside the target worktree
-  if [[ -d "$dir" ]]; then
-    local here; here="$(pwd -P)"
-    if [[ "$here" == "$dir"* ]]; then
+  # The worktree may be gone already; finalize then only deletes the branch.
+  local dir="" wt_branch
+  if dir="$(zg_helpers_resolve_worktree "$branch")"; then
+    # Avoid operating inside the target worktree
+    if zg_helpers_inside_dir "$dir"; then
       echo "❌ You are inside the '$branch' worktree. Switch away before finalizing." >&2
       return 1
     fi
+    # A directory-name match may hold a differently named branch (e.g. migrated
+    # feature__foo); delete the branch actually checked out there.
+    wt_branch="$(git -C "$dir" branch --show-current)"
+    branch="${wt_branch:-$branch}"
   fi
 
   # Fresh remote info (optional but helpful)
   zg_helpers_fetch_origin || return 1
 
   # Remove worktree (respect --force)
-  if [[ -d "$dir" ]]; then
+  if [[ -n "$dir" ]]; then
     if [[ "$force" == "true" ]]; then
       git worktree remove --force "$dir" || { echo "❌ Failed to force-remove worktree: $branch" >&2; return 1; }
     else
