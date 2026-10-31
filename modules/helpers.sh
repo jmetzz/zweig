@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Zweig Helpers Module - helpers.sh
 # Provides reusable helper functions for the other modules.
+# Requires: bash 4.3+ (zg_helpers_load_worktrees uses namerefs)
 
 set -u
 
@@ -51,19 +52,35 @@ zg_helpers_worktree_exists() {
     [ -d "$ZWEIG_WORKTREE_DIR/$1" ]
 }
 
-# --- Print the path git has registered for a branch's worktree ---
-# Prints nothing (and returns 1) if the branch isn't checked out in any
-# worktree. The path is printed even if that directory no longer exists.
-zg_helpers_branch_worktree_path() {
-    local branch="$1" wt_path
+# --- List every checked-out branch with its worktree, main checkout included ---
+# Prints one "<branch>\t<path>" line per worktree that has a branch (detached
+# and bare entries are left out). Split lines as for zg_helpers_list_worktrees.
+# Returns 1 if git can't list worktrees.
+zg_helpers_checked_out_branches() {
+    local porcelain
+    porcelain="$(git worktree list --porcelain)" || return 1
     # substr($0, 10), not $2: worktree paths may contain spaces, and
     # 10 = length("worktree ") + 1.
-    wt_path="$(git worktree list --porcelain | awk -v b="$branch" '
+    awk '
         $1=="worktree" {wt=substr($0, 10)}
-        $1=="branch"   {sub("^refs/heads/","",$2); if ($2==b) {print wt; exit}}
-    ')"
-    [[ -n "$wt_path" ]] || return 1
-    printf '%s\n' "$wt_path"
+        $1=="branch"   {b=$2; sub("^refs/heads/","",b); printf "%s\t%s\n", b, wt}
+    ' <<<"$porcelain"
+}
+
+# --- Print the path git has registered for a branch's worktree ---
+# The path is printed even if that directory no longer exists. Returns 1 if the
+# branch isn't checked out in any worktree, 2 if git can't list worktrees (so
+# callers don't mistake a git failure for "not checked out").
+zg_helpers_branch_worktree_path() {
+    local branch="$1" listing line
+    listing="$(zg_helpers_checked_out_branches)" || return 2
+    while IFS= read -r line; do
+        if [[ "${line%%$'\t'*}" == "$branch" ]]; then
+            printf '%s\n' "${line#*$'\t'}"
+            return 0
+        fi
+    done <<<"$listing"
+    return 1
 }
 
 # --- List every linked worktree of the repo, wherever it lives on disk ---
@@ -72,7 +89,8 @@ zg_helpers_branch_worktree_path() {
 # The branch is empty for a detached HEAD. Paths are printed even if the
 # directory no longer exists. Returns 1 if git can't list worktrees.
 #
-# Refs can't contain a tab, so callers split on the first one:
+# Refs can't contain a tab, so callers split on the first one (paths containing
+# a tab or newline are not supported):
 # branch="${line%%$'\t'*}" path="${line#*$'\t'}". Not `IFS=$'\t' read`: tab is
 # IFS whitespace, so read would drop an empty (detached) branch field.
 zg_helpers_list_worktrees() {
@@ -94,7 +112,9 @@ zg_helpers_list_worktrees() {
 # Fills the named arrays in parallel, one element per worktree from
 # zg_helpers_list_worktrees (branch empty for a detached HEAD). A worktree whose
 # directory is missing is left out with a warning on stderr.
-# Returns 0, 2 if any worktree was left out, or 1 if git can't list worktrees.
+# Returns 0 when all were loaded; 2 when some were left out (already warned
+# about, so callers decide whether that is a failure); 1 when git can't list
+# worktrees (fatal: callers return 1).
 zg_helpers_load_worktrees() {
     local -n _zg_branches="$1" _zg_dirs="$2"
     local listing line branch dir rc=0
@@ -127,10 +147,25 @@ zg_helpers_worktree_label() {
 # git refuses to check a branch out twice; this names the worktree holding it
 # (wherever it lives) instead of surfacing git's raw error. Returns 1 if taken.
 zg_helpers_ensure_branch_free() {
-    local branch="$1" wt_path
-    wt_path="$(zg_helpers_branch_worktree_path "$branch")" || return 0
-    echo "❌ Branch '$branch' is already checked out at $wt_path. Try: zg switch $branch" >&2
+    local branch="$1" wt_path rc=0
+    wt_path="$(zg_helpers_branch_worktree_path "$branch")" || rc=$?
+    case $rc in
+        0) echo "❌ Branch '$branch' is already checked out at $wt_path. Try: zg switch $branch" >&2 ;;
+        1) return 0 ;;
+        *) echo "❌ Error: Could not list worktrees." >&2 ;;
+    esac
     return 1
+}
+
+# --- True if a worktree has uncommitted work or a git operation in progress ---
+# Uncommitted work includes untracked files (ignored ones are not counted).
+# Operations: merge, cherry-pick, revert or rebase.
+zg_helpers_worktree_busy() {
+    local dir="$1" gitdir
+    [[ -z "$(git -C "$dir" status --porcelain --ignore-submodules 2>/dev/null)" ]] || return 0
+    gitdir="$(git -C "$dir" rev-parse --absolute-git-dir 2>/dev/null)" || return 0
+    [[ -e "$gitdir/MERGE_HEAD" || -e "$gitdir/CHERRY_PICK_HEAD" || -e "$gitdir/REVERT_HEAD" \
+        || -d "$gitdir/rebase-merge" || -d "$gitdir/rebase-apply" ]]
 }
 
 # --- Resolve a worktree identifier to its path (prints the path) ---
@@ -266,7 +301,8 @@ Worktree Core Lifecycle:
                                      (requires the shell shim; see shims/shims.sh).
   zg (remove|rm) <worktree>         Remove a worktree but keeps the branch.
   zg remove merged                  Remove worktrees whose branches are merged into the default branch,
-                                     wherever they live on disk; detached ones are skipped.
+                                     wherever they live on disk; detached ones, and ones with
+                                     uncommitted work or a merge/rebase in progress, are skipped.
   zg (switch|cd) <worktree|branch>  Enter a worktree or switch to one by branch name.
                                      Finds worktrees anywhere on disk; detached ones
                                      only by their directory name under the worktree dir.

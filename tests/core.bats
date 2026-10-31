@@ -653,15 +653,17 @@ make_repo_with_origin() {
 }
 
 # Puts a stub fzf on PATH that records its arguments and input, then prints the
-# first input line containing $FZF_PICK (nothing, i.e. cancelled, if unset).
+# first input line containing $FZF_PICK. With FZF_PICK unset it exits like a
+# cancelled fzf (130), or with $FZF_EXIT when that is set.
 stub_fzf() {
     mkdir -p "$TEST_ROOT/bin"
     cat > "$TEST_ROOT/bin/fzf" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$@" > "$TEST_ROOT/fzf.args"
 cat > "$TEST_ROOT/fzf.input"
-[ -n "${FZF_PICK:-}" ] && grep -F -m1 -- "$FZF_PICK" "$TEST_ROOT/fzf.input"
-exit 0
+[ -n "${FZF_EXIT:-}" ] && exit "$FZF_EXIT"
+[ -n "${FZF_PICK:-}" ] || exit 130
+grep -F -m1 -- "$FZF_PICK" "$TEST_ROOT/fzf.input"
 STUB
     chmod +x "$TEST_ROOT/bin/fzf"
     export TEST_ROOT PATH="$TEST_ROOT/bin:$PATH"
@@ -677,10 +679,7 @@ STUB
     run "$ZG" select
     [ "$status" -eq 0 ]
     run cut -f1 "$TEST_ROOT/fzf.input"
-    [[ "$output" == *"outside"* ]]
-    [[ "$output" == *"feature/foo"* ]]
-    [[ "$output" == *"(detached: $sha7)"* ]]
-    [[ "$output" != *"main"* ]]
+    [ "$(sort <<<"$output")" = "$(printf '%s\n' "(detached: $sha7)" feature/foo outside)" ]
     grep -q -- "git -C {2} log --oneline --decorate -n 10" "$TEST_ROOT/fzf.args"
 }
 
@@ -759,9 +758,134 @@ STUB
     git worktree add -q -b other "$REPO/.worktrees/done"
     git -C "$REPO/.worktrees/done" commit -q --allow-empty -m "feat: unmerged"
     git worktree add -q -b done "$TEST_ROOT/elsewhere/done"
+    git worktree add -q -b also-done "$TEST_ROOT/elsewhere/also-done"
     run "$ZG" remove merged --force
     [ "$status" -ne 0 ]
     [ -d "$REPO/.worktrees/done" ]
     [ "$(git -C "$REPO/.worktrees/done" branch --show-current)" = "other" ]
-    [[ "$output" == *"done"*"resolves to"* ]]
+    [[ "$output" == *"Not finalizing done: its name resolves to $(realdir "$REPO")/.worktrees/done"* ]]
+    [ ! -e "$TEST_ROOT/elsewhere/also-done" ]
+}
+
+@test "zg select switches to a picked detached worktree whose path has a space" {
+    make_repo
+    git worktree add -q --detach "$TEST_ROOT/else where/loose"
+    stub_fzf
+    FZF_PICK="(detached:" run "$ZG" select
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Switched to worktree: (detached: "* ]]
+    [[ "$output" == *"Path: "*"/else where/loose" ]]
+}
+
+@test "zg select stays put when cancelled and fails when fzf errors" {
+    make_repo
+    git worktree add -q -b outside "$TEST_ROOT/elsewhere/outside"
+    stub_fzf
+    run "$ZG" select
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"Switched"* ]]
+    FZF_EXIT=2 run "$ZG" select
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"fzf failed (exit 2)"* ]]
+}
+
+@test "zg select warns about a worktree whose directory is missing and lists the rest" {
+    make_repo
+    git worktree add -q -b gone "$TEST_ROOT/elsewhere/gone"
+    git worktree add -q -b outside "$TEST_ROOT/elsewhere/outside"
+    rm -rf "$TEST_ROOT/elsewhere/gone"
+    stub_fzf
+    run "$ZG" select
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Skipping gone: directory missing"* ]]
+    [ "$(cut -f1 "$TEST_ROOT/fzf.input")" = "outside" ]
+}
+
+@test "zg remove merged warns about a missing directory but finalizes the rest" {
+    make_repo_with_origin
+    git worktree add -q -b gone "$TEST_ROOT/elsewhere/gone"
+    git worktree add -q -b done "$TEST_ROOT/elsewhere/done"
+    rm -rf "$TEST_ROOT/elsewhere/gone"
+    run "$ZG" remove merged --force
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Skipping gone: directory missing"* ]]
+    [[ "$output" == *"missing directory were not checked"* ]]
+    [ ! -e "$TEST_ROOT/elsewhere/done" ]
+}
+
+@test "zg remove merged skips worktrees holding uncommitted work or a rebase" {
+    make_repo_with_origin
+    git worktree add -q -b fresh "$TEST_ROOT/elsewhere/fresh"
+    touch "$TEST_ROOT/elsewhere/fresh/notes.txt"
+    git worktree add -q -b rebasing "$TEST_ROOT/elsewhere/rebasing"
+    mkdir "$(git -C "$TEST_ROOT/elsewhere/rebasing" rev-parse --absolute-git-dir)/rebase-merge"
+    git worktree add -q -b done "$TEST_ROOT/elsewhere/done"
+    run "$ZG" remove merged --force
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Skipping fresh: uncommitted work"* ]]
+    [[ "$output" == *"Skipping rebasing: uncommitted work or a merge/rebase in progress"* ]]
+    [ -f "$TEST_ROOT/elsewhere/fresh/notes.txt" ]
+    [ -d "$TEST_ROOT/elsewhere/rebasing" ]
+    [ ! -e "$TEST_ROOT/elsewhere/done" ]
+}
+
+@test "zg create reports a branch checked out in the main checkout or on a slash branch" {
+    make_repo
+    git worktree add -q -b feature/foo "$TEST_ROOT/elsewhere/foo"
+    run "$ZG" create from feature/foo
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"'feature/foo' is already checked out at "*"/elsewhere/foo"* ]]
+    git checkout -q -b in-main
+    run "$ZG" create in-main
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"'in-main' is already checked out at "* ]]
+    [ ! -e "$REPO/.worktrees/in-main" ]
+}
+
+@test "zg sync current rebases a slash branch whose directory name differs" {
+    make_repo_with_origin
+    git worktree add -q -b feature/foo "$REPO/.worktrees/feature__foo"
+    git commit -q --allow-empty -m "chore: advance main"
+    git push -q origin main
+    cd "$REPO/.worktrees/feature__foo"
+    run "$ZG" sync current
+    [ "$status" -eq 0 ]
+    git merge-base --is-ancestor origin/main HEAD
+}
+
+@test "zg sync current refuses a protected worktree and the default branch" {
+    make_repo_with_origin
+    git worktree add -q -b keep "$TEST_ROOT/elsewhere/keep"
+    touch "$TEST_ROOT/elsewhere/keep/.protected"
+    git commit -q --allow-empty -m "chore: advance main"
+    git push -q origin main
+    cd "$TEST_ROOT/elsewhere/keep"
+    run "$ZG" sync current
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"(keep) is protected"* ]]
+    ! git merge-base --is-ancestor origin/main HEAD
+    cd "$REPO"
+    run "$ZG" sync current
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"(main) is protected"* ]]
+}
+
+@test "zg migrate names a directory that already exists for another branch" {
+    make_repo
+    git branch loose
+    mkdir -p "$REPO/.worktrees/loose"
+    run "$ZG" migrate
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Directory already exists, not migrating loose: "*"/.worktrees/loose"* ]]
+}
+
+@test "zg refuses to run on bash older than 4.3" {
+    [ -x /bin/bash ] || skip "no /bin/bash"
+    if /bin/bash -c '(( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 3) ))'; then
+        skip "/bin/bash is 4.3 or newer"
+    fi
+    make_repo
+    run /bin/bash "$ZG" status
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"needs bash 4.3 or newer"* ]]
 }
