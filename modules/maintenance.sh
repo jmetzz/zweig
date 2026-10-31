@@ -3,35 +3,7 @@
 # Commands: status, prune (metadata|trees), sync, migrate, protect, unprotect
 # Functions named zg_maintenance__<name> (double underscore) are internal
 # helpers, not commands.
-# Requires: bash 4.3+ (namerefs)
-
-# --- Load the linked worktrees for a bulk sweep into two arrays ---
-# Usage: zg_maintenance__load_worktrees <branches-array> <dirs-array>
-# Fills the named arrays in parallel, one element per worktree from
-# zg_helpers_list_worktrees (branch empty for a detached HEAD). A worktree whose
-# directory is missing is left out with a warning on stderr.
-# Returns 0, 2 if any worktree was left out, or 1 if git can't list worktrees.
-zg_maintenance__load_worktrees() {
-    local -n _zg_branches="$1" _zg_dirs="$2"
-    local listing line branch dir rc=0
-    _zg_branches=() _zg_dirs=()
-    if ! listing="$(zg_helpers_list_worktrees)"; then
-        echo "❌ Error: Could not list worktrees." >&2
-        return 1
-    fi
-    [[ -n "$listing" ]] || return 0
-    while IFS= read -r line; do
-        # Split on the first tab; see zg_helpers_list_worktrees for why not `read`.
-        branch="${line%%$'\t'*}" dir="${line#*$'\t'}"
-        if [[ -d "$dir" ]]; then
-            _zg_branches+=("$branch") _zg_dirs+=("$dir")
-        else
-            echo "⚠️ Skipping $(zg_maintenance__label "$branch" "$dir"): directory missing ($dir). Try: zg prune metadata" >&2
-            rc=2
-        fi
-    done <<<"$listing"
-    return "$rc"
-}
+# Requires: bash 4.3+ (namerefs, via zg_helpers_load_worktrees)
 
 # --- Show sync status ---
 zg_maintenance_status() {
@@ -39,21 +11,15 @@ zg_maintenance_status() {
     echo "📊 Worktree sync status (vs origin/$ZWEIG_DEFAULT_BRANCH):"
     local branches dirs i branch dir ahead behind rc=0
     # A missing directory (rc 2) is only warned about: status is a read-only report.
-    zg_maintenance__load_worktrees branches dirs || rc=$?
+    zg_helpers_load_worktrees branches dirs || rc=$?
     [[ $rc -ne 1 ]] || return 1
     # ${#dirs[@]}, not "${!dirs[@]}": the latter trips set -u on an empty array before bash 4.4.
     for ((i = 0; i < ${#dirs[@]}; i++)); do
         branch="${branches[i]}" dir="${dirs[i]}"
         ahead=$(git -C "$dir" rev-list --count origin/"$ZWEIG_DEFAULT_BRANCH"..HEAD 2>/dev/null || echo 0)
         behind=$(git -C "$dir" rev-list --count HEAD..origin/"$ZWEIG_DEFAULT_BRANCH" 2>/dev/null || echo 0)
-        echo "- $(zg_maintenance__label "$branch" "$dir"): ↑$ahead ↓$behind"
+        echo "- $(zg_helpers_worktree_label "$branch" "$dir"): ↑$ahead ↓$behind"
     done
-}
-
-# --- Name a worktree in output: its branch, or its directory name if detached ---
-zg_maintenance__label() {
-    local branch="$1" dir="$2"
-    if [[ -n "$branch" ]]; then printf '%s\n' "$branch"; else basename "$dir"; fi
 }
 
 # --- Remove broken worktree metadata ---
@@ -92,7 +58,7 @@ zg_maintenance_prune_trees() {
     local branches dirs i branch dir failed=0 rc=0
     # A worktree with a missing directory is only warned about here: it isn't a
     # prune failure, and `zg prune metadata` cleans it up.
-    zg_maintenance__load_worktrees branches dirs || rc=$?
+    zg_helpers_load_worktrees branches dirs || rc=$?
     [[ $rc -ne 1 ]] || return 1
     for ((i = 0; i < ${#dirs[@]}; i++)); do
         branch="${branches[i]}" dir="${dirs[i]}"
@@ -171,12 +137,12 @@ zg_maintenance_sync_all() {
 
     local branches dirs i branch dir label failed=0 rc=0
     # A worktree with a missing directory wasn't synced, so it counts as a failure.
-    zg_maintenance__load_worktrees branches dirs || rc=$?
+    zg_helpers_load_worktrees branches dirs || rc=$?
     [[ $rc -ne 1 ]] || return 1
     [[ $rc -ne 2 ]] || failed=1
     for ((i = 0; i < ${#dirs[@]}; i++)); do
         branch="${branches[i]}" dir="${dirs[i]}"
-        label="$(zg_maintenance__label "$branch" "$dir")"
+        label="$(zg_helpers_worktree_label "$branch" "$dir")"
 
         if zg_helpers_dir_is_protected "$branch" "$dir"; then
             echo "🛡️ Skipping protected: $label"
@@ -202,15 +168,22 @@ zg_maintenance_sync_all() {
 }
 
 # --- Sync the current worktree ---
+# Works on the current worktree's own path, wherever it lives on disk.
 zg_maintenance_sync_current() {
     local sync_branch="${1:-$ZWEIG_DEFAULT_BRANCH}"
-    local current_wtree
-    current_wtree=$(basename "$(git rev-parse --show-toplevel)")
+    local wdir branch label
+    wdir="$(git rev-parse --show-toplevel)" || return 1
+    branch="$(zg_helpers_worktree_branch "$wdir")" || return 1
+    label="$(zg_helpers_worktree_label "$branch" "$wdir")"
+    # Same rule as sync all: never move a detached HEAD.
+    if [[ -z "$branch" ]]; then
+        echo "❌ Current worktree ($label) has a detached HEAD; nothing to sync." >&2
+        return 1
+    fi
 
-    echo "🔄 Syncing current worktree ($current_wtree) with origin/$sync_branch..."
-    local rc
-    zg_maintenance_sync_tree "$current_wtree" "$sync_branch"
-    rc=$?
+    echo "🔄 Syncing current worktree ($label) with origin/$sync_branch..."
+    local rc=0
+    zg_maintenance__sync_dir "$wdir" "$label" "$sync_branch" || rc=$?
     if [[ $rc -eq 0 ]]; then
         echo "✅ Current worktree sync complete."
     else
@@ -264,11 +237,14 @@ zg_maintenance__sync_dir() {
 zg_maintenance_migrate() {
     echo "🚚 Migrating branches to worktrees..."
 
-    local branch dir_name dir
+    local branch dir_name dir checked_out
     for branch in $(git for-each-ref --format='%(refname:short)' refs/heads/ | grep -vE "^($ZWEIG_DEFAULT_BRANCH|HEAD)"); do
         dir_name="${branch//\//__}"
         dir="$ZWEIG_WORKTREE_DIR/$dir_name"
-        if [[ -d "$dir" ]]; then
+        # git refuses to check a branch out twice, wherever the other worktree is.
+        if checked_out="$(zg_helpers_branch_worktree_path "$branch")"; then
+            echo "⏭️ Already checked out: $branch ($checked_out)"
+        elif [[ -d "$dir" ]]; then
             echo "⏭️ Already exists: $branch"
         else
             echo "➡️ Adding $branch to worktree..."

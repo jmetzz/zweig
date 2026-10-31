@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Zweig Extensions Module - extensions.sh
 # Optional helpers and interactive commands
-# Requires: bash 4+, fzf (if used)
+# Requires: bash 4.3+ (namerefs, via zg_helpers_load_worktrees), fzf (if used)
 
 
 # --- Interactive selector (fzf required) ---
@@ -11,16 +11,37 @@ zg_extensions_select() {
         return 1
     fi
 
-    if [[ ! -d "$ZWEIG_WORKTREE_DIR" ]]; then
-        echo "❌ No worktrees found in $ZWEIG_WORKTREE_DIR" >&2
+    local branches dirs i label menu="" rc=0
+    # Worktrees whose directory is missing are left out with a warning.
+    zg_helpers_load_worktrees branches dirs || rc=$?
+    [[ $rc -ne 1 ]] || return 1
+    for ((i = 0; i < ${#dirs[@]}; i++)); do
+        label="${branches[i]}"
+        if [[ -z "$label" ]]; then
+            label="(detached: $(git -C "${dirs[i]}" rev-parse --short=7 HEAD 2>/dev/null || echo unknown))"
+        fi
+        # Refs can't contain a tab, so "<label>\t<path>" splits unambiguously.
+        menu+="$label"$'\t'"${dirs[i]}"$'\n'
+    done
+    if [[ -z "$menu" ]]; then
+        echo "❌ No worktrees found" >&2
         return 1
     fi
 
+    # fzf shows only the label; {2} (the path, quoted by fzf) feeds the preview.
     local selected
-    selected=$(find "$ZWEIG_WORKTREE_DIR" -maxdepth 1 -mindepth 1 -type d | sed "s|$ZWEIG_WORKTREE_DIR/||" | fzf)
-    if [[ -n "$selected" ]]; then
-        zg_core_switch "$selected"
-    fi
+    selected="$(printf '%s' "$menu" | fzf --delimiter=$'\t' --with-nth=1 \
+        --preview='git -C {2} log --oneline --decorate -n 10' \
+        --prompt='Select worktree > ')" || true
+    # Nothing picked (e.g. Esc): leave the user where they are.
+    [[ -n "$selected" ]] || return 0
+
+    # cd to the picked path rather than zg_core_switch: switch resolves by name,
+    # which can't reach a detached worktree outside the worktree dir.
+    local dir="${selected#*$'\t'}"
+    cd "$dir" || return
+    echo "📂 Switched to worktree: ${selected%%$'\t'*}"
+    echo "   Path: $dir"
 }
 
 # --- From GitHub PR (requires gh CLI; loader enforces preconditions) ---

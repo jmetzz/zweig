@@ -28,8 +28,7 @@ worktree argument resolves it through one shared resolver
 (`zg_helpers_resolve_worktree`). Bulk commands, which take no worktree
 argument, enumerate every linked worktree from `git worktree list --porcelain`
 (`zg_helpers_list_worktrees`) instead of globbing `$ZWEIG_WORKTREE_DIR`.
-`remove merged`, `select`, `migrate` and `sync current` still assume
-`$ZWEIG_WORKTREE_DIR` and move over in #15.
+Commands that act on the worktree they run in use that worktree's own path.
 
 1. **Fast path:** if `$ZWEIG_WORKTREE_DIR/<identifier>` is a directory, use it.
    This costs no subprocess and covers the common case of a worktree zg created.
@@ -43,8 +42,7 @@ differ from the branch (e.g. migrated `feature__foo`).
 
 ## Consequences
 
-- Commands find and sweep worktrees anywhere on disk, apart from the #15
-  exceptions above.
+- Commands find and sweep worktrees anywhere on disk.
 - Git is the source of truth for which worktrees exist; zg keeps no registry.
 - If a directory under `$ZWEIG_WORKTREE_DIR` shares its name with a
   *different* branch, the fast path wins and that branch is unreachable by
@@ -54,9 +52,10 @@ differ from the branch (e.g. migrated `feature__foo`).
   accepted: such names are rare, and the directory stays reachable by its
   directory name.
 - Detached-HEAD worktrees have no branch and are only reachable via the fast
-  path (by directory name) for now. Bulk sweeps list them in `status` but
-  skip them in `sync all` and `prune trees`: they have no branch to rebase or
-  look up on the remote.
+  path (by directory name) for now. Bulk sweeps list them in `status` and
+  `select` but skip them in `sync all`, `prune trees` and `remove merged`:
+  they have no branch to rebase, look up on the remote or test for merging.
+  `sync current` refuses one for the same reason.
 - Identifiers containing `.` or `..` path components are rejected, so the fast
   path can't be used to traverse out of `$ZWEIG_WORKTREE_DIR`. (The fallback
   still resolves worktrees anywhere on disk, by branch.)

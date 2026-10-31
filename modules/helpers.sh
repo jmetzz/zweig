@@ -89,6 +89,50 @@ zg_helpers_list_worktrees() {
     ' <<<"$porcelain"
 }
 
+# --- Load the linked worktrees for a bulk sweep into two arrays ---
+# Usage: zg_helpers_load_worktrees <branches-array> <dirs-array>
+# Fills the named arrays in parallel, one element per worktree from
+# zg_helpers_list_worktrees (branch empty for a detached HEAD). A worktree whose
+# directory is missing is left out with a warning on stderr.
+# Returns 0, 2 if any worktree was left out, or 1 if git can't list worktrees.
+zg_helpers_load_worktrees() {
+    local -n _zg_branches="$1" _zg_dirs="$2"
+    local listing line branch dir rc=0
+    _zg_branches=() _zg_dirs=()
+    if ! listing="$(zg_helpers_list_worktrees)"; then
+        echo "❌ Error: Could not list worktrees." >&2
+        return 1
+    fi
+    [[ -n "$listing" ]] || return 0
+    while IFS= read -r line; do
+        # Split on the first tab; see zg_helpers_list_worktrees for why not `read`.
+        branch="${line%%$'\t'*}" dir="${line#*$'\t'}"
+        if [[ -d "$dir" ]]; then
+            _zg_branches+=("$branch") _zg_dirs+=("$dir")
+        else
+            echo "⚠️ Skipping $(zg_helpers_worktree_label "$branch" "$dir"): directory missing ($dir). Try: zg prune metadata" >&2
+            rc=2
+        fi
+    done <<<"$listing"
+    return "$rc"
+}
+
+# --- Name a worktree in output: its branch, or its directory name if detached ---
+zg_helpers_worktree_label() {
+    local branch="$1" dir="$2"
+    if [[ -n "$branch" ]]; then printf '%s\n' "$branch"; else basename "$dir"; fi
+}
+
+# --- Fail if a branch is already checked out in any worktree ---
+# git refuses to check a branch out twice; this names the worktree holding it
+# (wherever it lives) instead of surfacing git's raw error. Returns 1 if taken.
+zg_helpers_ensure_branch_free() {
+    local branch="$1" wt_path
+    wt_path="$(zg_helpers_branch_worktree_path "$branch")" || return 0
+    echo "❌ Branch '$branch' is already checked out at $wt_path. Try: zg switch $branch" >&2
+    return 1
+}
+
 # --- Resolve a worktree identifier to its path (prints the path) ---
 # The identifier is a branch name (canonical identity, see docs/adr/0001).
 # Fast path: a directory of that name under ZWEIG_WORKTREE_DIR (no subprocess).
@@ -221,7 +265,8 @@ Worktree Core Lifecycle:
   zg create ... -s                  Add -s to any create form to switch into it immediately
                                      (requires the shell shim; see shims/shims.sh).
   zg (remove|rm) <worktree>         Remove a worktree but keeps the branch.
-  zg remove merged                  Remove worktrees whose branches are merged into the default branch.
+  zg remove merged                  Remove worktrees whose branches are merged into the default branch,
+                                     wherever they live on disk; detached ones are skipped.
   zg (switch|cd) <worktree|branch>  Enter a worktree or switch to one by branch name.
                                      Finds worktrees anywhere on disk; detached ones
                                      only by their directory name under the worktree dir.
@@ -240,7 +285,8 @@ Maintenance:
   zg prune metadata                 Prune broken worktree metadata.
   zg prune trees                    Prune worktrees for deleted remote branches, covering
                                      every worktree of the repo, wherever it lives on disk.
-  zg migrate                        Migrate existing branches to worktrees.
+  zg migrate                        Migrate existing branches to worktrees, skipping branches
+                                     already checked out in any worktree.
 
 Meta:
   zg main                           Jump to the main worktree (default branch).
@@ -249,7 +295,8 @@ Meta:
   zg version                        Show Zweig CLI version.
 
 Extensions:
-  zg select                         Fuzzy switch to a worktree (requires fzf).
+  zg select                         Fuzzy switch to any worktree of the repo, with a git log
+                                     preview (requires fzf).
   zg create from-pr <pr-id>         Create worktree from GitHub PR (requires gh).
 
 EOF

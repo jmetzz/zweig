@@ -615,3 +615,153 @@ make_repo_with_origin() {
     [ -d "$TEST_ROOT/outside" ]
     [ ! -e "$REPO/.worktrees/foo" ]
 }
+
+@test "zg remove merged finalizes an outside worktree whose branch is merged" {
+    make_repo_with_origin
+    git worktree add -q -b done "$TEST_ROOT/elsewhere/done"
+    run "$ZG" remove merged --force
+    [ "$status" -eq 0 ]
+    [ ! -e "$TEST_ROOT/elsewhere/done" ]
+    run git show-ref --verify --quiet refs/heads/done
+    [ "$status" -ne 0 ]
+}
+
+@test "zg remove merged checks the branch checked out, not the directory name" {
+    make_repo_with_origin
+    git worktree add -q -b feature/foo "$REPO/.worktrees/feature__foo"
+    git worktree add -q -b wip "$TEST_ROOT/elsewhere/wip"
+    git -C "$TEST_ROOT/elsewhere/wip" commit -q --allow-empty -m "feat: unmerged"
+    run "$ZG" remove merged --force
+    [ "$status" -eq 0 ]
+    [ ! -e "$REPO/.worktrees/feature__foo" ]
+    run git show-ref --verify --quiet refs/heads/feature/foo
+    [ "$status" -ne 0 ]
+    [ -d "$TEST_ROOT/elsewhere/wip" ]
+}
+
+@test "zg remove merged skips protected and detached outside worktrees" {
+    make_repo_with_origin
+    git worktree add -q -b keep "$TEST_ROOT/elsewhere/keep"
+    touch "$TEST_ROOT/elsewhere/keep/.protected"
+    git worktree add -q --detach "$TEST_ROOT/elsewhere/loose"
+    run "$ZG" remove merged --force
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Skipping protected: keep"* ]]
+    [[ "$output" == *"Skipping detached worktree: loose"* ]]
+    [ -d "$TEST_ROOT/elsewhere/keep" ]
+    [ -d "$TEST_ROOT/elsewhere/loose" ]
+}
+
+# Puts a stub fzf on PATH that records its arguments and input, then prints the
+# first input line containing $FZF_PICK (nothing, i.e. cancelled, if unset).
+stub_fzf() {
+    mkdir -p "$TEST_ROOT/bin"
+    cat > "$TEST_ROOT/bin/fzf" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$TEST_ROOT/fzf.args"
+cat > "$TEST_ROOT/fzf.input"
+[ -n "${FZF_PICK:-}" ] && grep -F -m1 -- "$FZF_PICK" "$TEST_ROOT/fzf.input"
+exit 0
+STUB
+    chmod +x "$TEST_ROOT/bin/fzf"
+    export TEST_ROOT PATH="$TEST_ROOT/bin:$PATH"
+}
+
+@test "zg select lists outside and detached worktrees with a git log preview" {
+    make_repo
+    git worktree add -q -b outside "$TEST_ROOT/elsewhere/outside"
+    git worktree add -q -b feature/foo "$REPO/.worktrees/feature__foo"
+    git worktree add -q --detach "$TEST_ROOT/elsewhere/loose"
+    local sha7; sha7="$(git rev-parse --short=7 HEAD)"
+    stub_fzf
+    run "$ZG" select
+    [ "$status" -eq 0 ]
+    run cut -f1 "$TEST_ROOT/fzf.input"
+    [[ "$output" == *"outside"* ]]
+    [[ "$output" == *"feature/foo"* ]]
+    [[ "$output" == *"(detached: $sha7)"* ]]
+    [[ "$output" != *"main"* ]]
+    grep -q -- "git -C {2} log --oneline --decorate -n 10" "$TEST_ROOT/fzf.args"
+}
+
+@test "zg select switches to the picked outside worktree" {
+    make_repo
+    git worktree add -q -b outside "$TEST_ROOT/elsewhere/outside"
+    stub_fzf
+    FZF_PICK=outside run "$ZG" select
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Path: "*"/elsewhere/outside"* ]]
+}
+
+@test "zg select reports no worktrees when only the main checkout exists" {
+    make_repo
+    mkdir -p "$REPO/.worktrees"
+    stub_fzf
+    run "$ZG" select
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"No worktrees found"* ]]
+    [ ! -e "$TEST_ROOT/fzf.input" ]
+}
+
+@test "zg migrate skips a branch already checked out in an outside worktree" {
+    make_repo
+    git worktree add -q -b outside "$TEST_ROOT/elsewhere/outside"
+    git branch loose
+    run "$ZG" migrate
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Already checked out: outside"* ]]
+    [[ "$output" != *"fatal"* ]]
+    [ ! -e "$REPO/.worktrees/outside" ]
+    [ "$(git -C "$REPO/.worktrees/loose" branch --show-current)" = "loose" ]
+}
+
+@test "zg sync current rebases the outside worktree it is run from" {
+    make_repo_with_origin
+    git worktree add -q -b ext "$TEST_ROOT/elsewhere/odd-name"
+    git commit -q --allow-empty -m "chore: advance main"
+    git push -q origin main
+    cd "$TEST_ROOT/elsewhere/odd-name"
+    run "$ZG" sync current
+    [ "$status" -eq 0 ]
+    git merge-base --is-ancestor origin/main HEAD
+}
+
+@test "zg sync current refuses a detached worktree and leaves its HEAD alone" {
+    make_repo_with_origin
+    git worktree add -q --detach "$TEST_ROOT/elsewhere/loose"
+    local before; before="$(git -C "$TEST_ROOT/elsewhere/loose" rev-parse HEAD)"
+    git commit -q --allow-empty -m "chore: advance main"
+    git push -q origin main
+    cd "$TEST_ROOT/elsewhere/loose"
+    run "$ZG" sync current
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"detached"* ]]
+    [ "$(git rev-parse HEAD)" = "$before" ]
+}
+
+@test "zg create and create from name the outside worktree already holding the branch" {
+    make_repo
+    git worktree add -q -b ext "$TEST_ROOT/elsewhere/odd-name"
+    for args in "ext" "from ext"; do
+        # shellcheck disable=SC2086
+        run "$ZG" create $args
+        [ "$status" -ne 0 ]
+        [[ "$output" == *"'ext' is already checked out at "*"/elsewhere/odd-name"* ]]
+        [[ "$output" != *"fatal"* ]]
+        [ ! -e "$REPO/.worktrees/ext" ]
+    done
+}
+
+@test "zg remove merged leaves a worktree whose directory name shadows a merged branch" {
+    make_repo_with_origin
+    # .worktrees/done holds unmerged work on another branch; the merged branch
+    # "done" lives outside. Finalizing "done" by name would hit the wrong one.
+    git worktree add -q -b other "$REPO/.worktrees/done"
+    git -C "$REPO/.worktrees/done" commit -q --allow-empty -m "feat: unmerged"
+    git worktree add -q -b done "$TEST_ROOT/elsewhere/done"
+    run "$ZG" remove merged --force
+    [ "$status" -ne 0 ]
+    [ -d "$REPO/.worktrees/done" ]
+    [ "$(git -C "$REPO/.worktrees/done" branch --show-current)" = "other" ]
+    [[ "$output" == *"done"*"resolves to"* ]]
+}
