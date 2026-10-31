@@ -12,7 +12,7 @@ zg_extensions_select() {
     fi
 
     if [[ ! -d "$ZWEIG_WORKTREE_DIR" ]]; then
-        echo "❌ No worktrees found in $ZWEIG_WORKTREE_DIR"
+        echo "❌ No worktrees found in $ZWEIG_WORKTREE_DIR" >&2
         return 1
     fi
 

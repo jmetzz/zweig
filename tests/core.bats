@@ -52,3 +52,38 @@ make_repo() {
     [ -d "$REPO/.worktrees/foo" ]
     [ "$(git -C "$REPO/.worktrees/foo" branch --show-current)" = "foo" ]
 }
+
+@test "zg version outside a repo does not create ~/.worktrees" {
+    cd "$TEST_ROOT"
+    run "$ZG" version
+    [ "$status" -eq 0 ]
+    [ ! -e "$HOME/.worktrees" ]
+}
+
+@test "zg status in a fresh repo does not create .worktrees" {
+    make_repo
+    run "$ZG" status
+    [ "$status" -eq 0 ]
+    [ ! -e "$REPO/.worktrees" ]
+}
+
+@test "zg select in a fresh repo reports no worktrees" {
+    make_repo
+    # Stub fzf so the select extension is available; it must not be reached.
+    mkdir -p "$TEST_ROOT/bin"
+    printf '#!/bin/sh\nexit 1\n' > "$TEST_ROOT/bin/fzf"
+    chmod +x "$TEST_ROOT/bin/fzf"
+    PATH="$TEST_ROOT/bin:$PATH" run "$ZG" select
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"No worktrees found"* ]]
+    [ ! -e "$REPO/.worktrees" ]
+}
+
+@test "zg create honours a ZWEIG_WORKTREE_DIR that does not exist yet" {
+    make_repo
+    export ZWEIG_WORKTREE_DIR="$TEST_ROOT/custom/nested"
+    run "$ZG" create foo
+    [ "$status" -eq 0 ]
+    [ -d "$ZWEIG_WORKTREE_DIR/foo" ]
+    [ ! -e "$REPO/.worktrees" ]
+}
