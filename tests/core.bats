@@ -389,3 +389,102 @@ realdir() { (cd "$1" && pwd -P); }
     [ "$status" -eq 0 ]
     [ ! -e "$REPO/.worktrees/feature__foo" ]
 }
+
+# make_repo plus a bare "origin" holding main, so fetch/rebase/ls-remote work.
+make_repo_with_origin() {
+    make_repo
+    git init -q --bare "$TEST_ROOT/origin.git"
+    git remote add origin "$TEST_ROOT/origin.git"
+    git push -q -u origin main
+}
+
+@test "zg status reports outside and zg-created worktrees by branch, not the main checkout" {
+    make_repo_with_origin
+    git worktree add -q -b ext "$TEST_ROOT/outside"
+    "$ZG" create foo >/dev/null
+    run "$ZG" status
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"- ext: ↑0 ↓0"* ]]
+    [[ "$output" == *"- foo: ↑0 ↓0"* ]]
+    [[ "$output" != *"- repo:"* ]]
+}
+
+@test "zg prune metadata drops an outside worktree whose directory was deleted" {
+    make_repo
+    git worktree add -q -b ext "$TEST_ROOT/outside"
+    rm -rf "$TEST_ROOT/outside"
+    run "$ZG" prune metadata
+    [ "$status" -eq 0 ]
+    [[ "$(git worktree list --porcelain)" != *"branch refs/heads/ext"* ]]
+}
+
+@test "zg prune trees removes outside and zg-created worktrees whose remote branch is gone" {
+    make_repo_with_origin
+    git worktree add -q -b ext "$TEST_ROOT/outside"
+    "$ZG" create foo >/dev/null
+    "$ZG" create kept >/dev/null
+    git push -q origin ext foo kept
+    git push -q origin --delete ext foo
+    run bash -c 'echo y | "$1" prune trees' _ "$ZG"
+    [ "$status" -eq 0 ]
+    [ ! -e "$TEST_ROOT/outside" ]
+    [ ! -e "$REPO/.worktrees/foo" ]
+    [ -d "$REPO/.worktrees/kept" ]
+    ! git show-ref --verify --quiet refs/heads/ext
+    ! git show-ref --verify --quiet refs/heads/foo
+}
+
+@test "zg prune trees skips a protected outside worktree" {
+    make_repo_with_origin
+    git worktree add -q -b ext "$TEST_ROOT/outside"
+    touch "$TEST_ROOT/outside/.protected"
+    run bash -c 'echo y | "$1" prune trees' _ "$ZG"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Skipping protected: ext"* ]]
+    [ -d "$TEST_ROOT/outside" ]
+}
+
+@test "zg sync all rebases outside and zg-created worktrees onto origin/main" {
+    make_repo_with_origin
+    git worktree add -q -b ext "$TEST_ROOT/outside"
+    "$ZG" create foo >/dev/null
+    git commit -q --allow-empty -m "chore: advance main"
+    git push -q origin main
+    run "$ZG" sync all
+    [ "$status" -eq 0 ]
+    git -C "$TEST_ROOT/outside" merge-base --is-ancestor origin/main HEAD
+    git -C "$REPO/.worktrees/foo" merge-base --is-ancestor origin/main HEAD
+}
+
+@test "zg sync all skips a protected outside worktree" {
+    make_repo_with_origin
+    git worktree add -q -b ext "$TEST_ROOT/outside"
+    touch "$TEST_ROOT/outside/.protected"
+    git commit -q --allow-empty -m "chore: advance main"
+    git push -q origin main
+    run "$ZG" sync all
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Skipping protected: ext"* ]]
+    ! git -C "$TEST_ROOT/outside" merge-base --is-ancestor origin/main HEAD
+}
+
+@test "zg sync <branch> rebases a worktree created outside the zg worktree dir" {
+    make_repo_with_origin
+    git worktree add -q -b ext "$TEST_ROOT/outside"
+    git commit -q --allow-empty -m "chore: advance main"
+    git push -q origin main
+    run "$ZG" sync ext
+    [ "$status" -eq 0 ]
+    git -C "$TEST_ROOT/outside" merge-base --is-ancestor origin/main HEAD
+}
+
+@test "zg status and prune trees handle a detached outside worktree whose path has a space" {
+    make_repo_with_origin
+    git worktree add -q --detach "$TEST_ROOT/out side"
+    run "$ZG" status
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"- out side: ↑0 ↓0"* ]]
+    run bash -c 'echo y | "$1" prune trees' _ "$ZG"
+    [ "$status" -eq 0 ]
+    [ -d "$TEST_ROOT/out side" ]
+}

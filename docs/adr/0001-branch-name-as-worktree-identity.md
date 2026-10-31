@@ -26,8 +26,11 @@ a large class of real worktrees.
 A worktree is identified by its **branch name**. Every command that takes a
 worktree argument will resolve it through one shared resolver
 (`zg_helpers_resolve_worktree`). `switch` and `path` use it as of #3;
-`remove`, `protect`, `unprotect`, `finalize` and `rebuild` as of #4; the
-remaining commands move onto it in #5 and #15.
+`remove`, `protect`, `unprotect`, `finalize` and `rebuild` as of #4; `sync
+<worktree>` as of #5; the remaining commands move onto it in #15. Bulk
+commands (`status`, `prune trees`, `sync all`) take no worktree argument:
+as of #5 they enumerate every linked worktree from
+`git worktree list --porcelain` instead of globbing `$ZWEIG_WORKTREE_DIR`.
 
 1. **Fast path:** if `$ZWEIG_WORKTREE_DIR/<identifier>` is a directory, use it.
    This costs no subprocess and covers the common case of a worktree zg created.
@@ -41,9 +44,10 @@ differ from the branch (e.g. migrated `feature__foo`).
 
 ## Consequences
 
-- `switch`, `path`, `remove`, `protect`, `unprotect`, `finalize` and `rebuild`
-  find worktrees anywhere on disk. #5 and #15 move the remaining commands onto
-  the same resolver.
+- `switch`, `path`, `remove`, `protect`, `unprotect`, `finalize`, `rebuild`
+  and `sync <worktree>` find worktrees anywhere on disk, and `status`,
+  `prune` and `sync all` sweep all of them. #15 moves the remaining commands
+  onto the same resolver.
 - Git is the source of truth for which worktrees exist; zg keeps no registry.
 - If a directory under `$ZWEIG_WORKTREE_DIR` shares its name with a
   *different* branch, the fast path wins and that branch is unreachable by
