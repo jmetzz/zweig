@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Zweig Maintenance Module
 # Commands: prune-metadata, remove-merged, remove-deleted-remote, sync, status, migrate
+# status, prune trees and sync all sweep every linked worktree git knows about,
+# wherever it lives on disk (zg_helpers_list_worktrees), not just ZWEIG_WORKTREE_DIR.
 # Requires: bash 4+
 
 
@@ -8,15 +10,23 @@
 zg_maintenance_status() {
     zg_helpers_fetch_origin || return 1
     echo "📊 Worktree sync status (vs origin/$ZWEIG_DEFAULT_BRANCH):"
-    shopt -s nullglob
-    for dir in "$ZWEIG_WORKTREE_DIR"/*; do
-        wtree="$(basename "$dir")"
+    local entries entry branch dir ahead behind
+    mapfile -t entries < <(zg_helpers_list_worktrees)
+    for entry in "${entries[@]+"${entries[@]}"}"; do
+        branch="${entry%%$'\t'*}" dir="${entry#*$'\t'}"
+        [[ -d "$dir" ]] || continue
         ahead=$(git -C "$dir" rev-list --count origin/"$ZWEIG_DEFAULT_BRANCH"..HEAD 2>/dev/null || echo 0)
         behind=$(git -C "$dir" rev-list --count HEAD..origin/"$ZWEIG_DEFAULT_BRANCH" 2>/dev/null || echo 0)
-        echo "- $wtree: ↑$ahead ↓$behind"
+        echo "- $(zg_maintenance__label "$branch" "$dir"): ↑$ahead ↓$behind"
     done
-    shopt -u nullglob
 }
+
+# --- Name a worktree in output: its branch, or its directory name if detached ---
+zg_maintenance__label() {
+    local branch="$1" dir="$2"
+    if [[ -n "$branch" ]]; then printf '%s\n' "$branch"; else basename "$dir"; fi
+}
+
 
 
 # --- Remove broken worktree metadata ---
@@ -52,31 +62,34 @@ zg_maintenance_prune_trees() {
     zg_helpers_fetch_origin || return 1
     echo "🔍 Checking for deleted remote branches..."
 
-    shopt -s nullglob
-    for dir in "$ZWEIG_WORKTREE_DIR"/*; do
-        wtree="$(basename "$dir")"
+    local entries entry branch dir
+    mapfile -t entries < <(zg_helpers_list_worktrees)
+    for entry in "${entries[@]+"${entries[@]}"}"; do
+        branch="${entry%%$'\t'*}" dir="${entry#*$'\t'}"
+        [[ -d "$dir" ]] || continue
+        # A detached worktree has no branch to look up on the remote.
+        [[ -n "$branch" ]] || continue
 
-        if zg_helpers_is_protected "$wtree"; then
-            echo "🛡️ Skipping protected: $wtree"
+        if zg_helpers_dir_is_protected "$branch" "$dir"; then
+            echo "🛡️ Skipping protected: $branch"
             continue
         fi
 
-        if ! git ls-remote --exit-code --heads origin "$wtree" &>/dev/null; then
-            echo "🔥 Remote branch gone: $wtree"
+        if ! git ls-remote --exit-code --heads origin "$branch" &>/dev/null; then
+            echo "🔥 Remote branch gone: $branch"
             git worktree remove "$dir" || { echo "❌ Failed to remove worktree dir: $dir"; continue; }
             echo "✅ Worktree removed."
 
-            if ! git branch -d "$wtree"; then
+            if ! git branch -d "$branch"; then
                 if [[ "$force" == "true" ]]; then
-                    echo "⚠️ Forcing delete of local branch '$wtree' ..."
-                    git branch -D "$wtree" || echo "❌ Could not force delete local branch '$wtree'."
+                    echo "⚠️ Forcing delete of local branch '$branch' ..."
+                    git branch -D "$branch" || echo "❌ Could not force delete local branch '$branch'."
                 else
-                    echo "⚠️ Could not delete local branch '$wtree' (not fully merged?). Use --force to override."
+                    echo "⚠️ Could not delete local branch '$branch' (not fully merged?). Use --force to override."
                 fi
             fi
         fi
     done
-    shopt -u nullglob
 
     echo "✅ Cleanup complete."
 }
@@ -116,20 +129,21 @@ zg_maintenance_sync_all() {
 
     echo "🔄 Syncing all worktrees with origin/$sync_branch..."
 
-    local failed=0
-    shopt -s nullglob
-    for dir in "$ZWEIG_WORKTREE_DIR"/*; do
-        wtree="$(basename "$dir")"
+    local failed=0 entries entry branch dir wtree
+    mapfile -t entries < <(zg_helpers_list_worktrees)
+    for entry in "${entries[@]+"${entries[@]}"}"; do
+        branch="${entry%%$'\t'*}" dir="${entry#*$'\t'}"
+        [[ -d "$dir" ]] || continue
+        wtree="$(zg_maintenance__label "$branch" "$dir")"
         echo "🔁 Rebasing $sync_branch into $wtree..."
 
-        if zg_helpers_is_protected "$wtree"; then
+        if zg_helpers_dir_is_protected "$branch" "$dir"; then
             echo "🛡️ Skipping protected: $wtree"
             continue
         fi
 
-        zg_maintenance_sync_tree "$wtree" "$sync_branch" || failed=1
+        zg_maintenance__sync_dir "$dir" "$wtree" "$sync_branch" || failed=1
     done
-    shopt -u nullglob
 
     if [[ $failed -eq 0 ]]; then
         echo "✅ All syncs succeeded."
@@ -167,12 +181,18 @@ zg_maintenance_sync_tree() {
         echo "❌ Error: Missing worktree name for sync."
         return 1
     fi
-    if ! zg_helpers_worktree_exists "$wtree"; then
-        echo "❌ Error: Worktree '$wtree' not found."
-        return 1
+    local wdir
+    if ! wdir="$(zg_helpers_resolve_worktree "$wtree")"; then
+        zg_helpers_report_worktree_not_found "$wtree"; return 1
     fi
 
-    local wdir="$ZWEIG_WORKTREE_DIR/$wtree"
+    zg_maintenance__sync_dir "$wdir" "$wtree" "$sync_branch"
+}
+
+# --- Rebase the worktree at a directory onto origin/<sync branch> ---
+# The label only names the worktree in messages.
+zg_maintenance__sync_dir() {
+    local wdir="$1" wtree="$2" sync_branch="$3"
     # guard: dirty worktree
     if ! git -C "$wdir" diff --quiet --ignore-submodules --; then
         echo "⚠️ Worktree '$wtree' has uncommitted changes. Commit/stash before syncing." >&2

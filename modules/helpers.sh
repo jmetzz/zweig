@@ -66,6 +66,24 @@ zg_helpers_branch_worktree_path() {
     printf '%s\n' "$wt_path"
 }
 
+# --- List every linked worktree of the repo, wherever it lives on disk ---
+# Prints one "<branch>\t<path>" line per worktree, skipping the main worktree
+# (always the first porcelain record) and bare entries. The branch is empty for
+# a detached HEAD. Refs can't contain a tab, so split on the first one with
+# ${line%%$'\t'*} / ${line#*$'\t'}. Not `IFS=$'\t' read`: tab is IFS whitespace,
+# so read would drop an empty (detached) branch field. Paths are printed even if the directory no
+# longer exists; callers skip those.
+zg_helpers_list_worktrees() {
+    # substr($0, 10): see zg_helpers_branch_worktree_path.
+    git worktree list --porcelain | awk '
+        function flush() { if (n > 1 && wt != "" && !bare) printf "%s\t%s\n", br, wt }
+        $1=="worktree" {flush(); n++; wt=substr($0, 10); br=""; bare=0}
+        $1=="branch"   {br=$2; sub("^refs/heads/","",br)}
+        $1=="bare"     {bare=1}
+        END            {flush()}
+    '
+}
+
 # --- Resolve a worktree identifier to its path (prints the path) ---
 # The identifier is a branch name (canonical identity, see docs/adr/0001).
 # Fast path: a directory of that name under ZWEIG_WORKTREE_DIR (no subprocess).
@@ -132,11 +150,20 @@ zg_helpers_is_protected() {
     if [[ "$wtree" == "$ZWEIG_DEFAULT_BRANCH" ]]; then
         return 0
     fi
-    # Or its worktree, wherever it lives, is marked with a .protected file.
-    # An identifier that resolves to no worktree counts as not protected:
-    # there is nothing on disk to protect.
+    # Or its worktree, wherever it lives, is protected. An identifier that
+    # resolves to no worktree counts as not protected: there is nothing on disk
+    # to protect.
     dir="$(zg_helpers_resolve_worktree "$wtree")" || return 1
-    [[ -f "$dir/.protected" ]]
+    zg_helpers_dir_is_protected "" "$dir"
+}
+
+# --- True if the worktree at a directory is protected ---
+# Takes the branch checked out there (empty if unknown or detached) and the
+# directory. Protected means it holds the default branch or carries a
+# .protected marker. Used directly by bulk sweeps, which already know both.
+zg_helpers_dir_is_protected() {
+    local branch="$1" dir="$2"
+    [[ "$branch" == "$ZWEIG_DEFAULT_BRANCH" || -f "$dir/.protected" ]]
 }
 
 # --- Seed a newly created worktree with local, usually-gitignored context files ---
@@ -202,6 +229,7 @@ Worktree Core Lifecycle:
   zg unprotect <worktree>           Remove protection marker from a worktree.
 
 Maintenance:
+  (status, sync and prune act on every worktree of the repo, wherever it lives on disk)
   zg status                         Show sync status of all worktrees.
   zg sync [all|current|<wtree>]     Sync worktrees with the default branch (or specified).
   zg rebase                         Rebase the current worktree onto the default branch.
