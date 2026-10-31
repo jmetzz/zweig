@@ -602,6 +602,8 @@ make_repo_with_origin() {
     ! git show-ref --verify --quiet refs/heads/ext
 }
 
+# foo is pruned because it was never pushed: this relies on the current
+# "not on origin = gone" rule, which #22 may change.
 @test "zg prune trees fails on a locked worktree but still prunes the others" {
     make_repo_with_origin
     git worktree add -q -b ext "$TEST_ROOT/outside"

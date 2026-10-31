@@ -5,7 +5,6 @@
 # helpers, not commands.
 # Requires: bash 4.3+ (namerefs)
 
-
 # --- Load the linked worktrees for a bulk sweep into two arrays ---
 # Usage: zg_maintenance__load_worktrees <branches-array> <dirs-array>
 # Fills the named arrays in parallel, one element per worktree from
@@ -39,9 +38,11 @@ zg_maintenance_status() {
     zg_helpers_fetch_origin || return 1
     echo "📊 Worktree sync status (vs origin/$ZWEIG_DEFAULT_BRANCH):"
     local branches dirs i branch dir ahead behind rc=0
+    # A missing directory (rc 2) is only warned about: status is a read-only report.
     zg_maintenance__load_worktrees branches dirs || rc=$?
     [[ $rc -ne 1 ]] || return 1
-    for i in "${!dirs[@]}"; do
+    # ${#dirs[@]}, not "${!dirs[@]}": the latter trips set -u on an empty array before bash 4.4.
+    for ((i = 0; i < ${#dirs[@]}; i++)); do
         branch="${branches[i]}" dir="${dirs[i]}"
         ahead=$(git -C "$dir" rev-list --count origin/"$ZWEIG_DEFAULT_BRANCH"..HEAD 2>/dev/null || echo 0)
         behind=$(git -C "$dir" rev-list --count HEAD..origin/"$ZWEIG_DEFAULT_BRANCH" 2>/dev/null || echo 0)
@@ -93,7 +94,7 @@ zg_maintenance_prune_trees() {
     # prune failure, and `zg prune metadata` cleans it up.
     zg_maintenance__load_worktrees branches dirs || rc=$?
     [[ $rc -ne 1 ]] || return 1
-    for i in "${!dirs[@]}"; do
+    for ((i = 0; i < ${#dirs[@]}; i++)); do
         branch="${branches[i]}" dir="${dirs[i]}"
         # A detached worktree has no branch to look up on the remote.
         [[ -n "$branch" ]] || continue
@@ -173,7 +174,7 @@ zg_maintenance_sync_all() {
     zg_maintenance__load_worktrees branches dirs || rc=$?
     [[ $rc -ne 1 ]] || return 1
     [[ $rc -ne 2 ]] || failed=1
-    for i in "${!dirs[@]}"; do
+    for ((i = 0; i < ${#dirs[@]}; i++)); do
         branch="${branches[i]}" dir="${dirs[i]}"
         label="$(zg_maintenance__label "$branch" "$dir")"
 

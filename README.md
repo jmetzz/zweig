@@ -21,7 +21,7 @@ Managing `git worktree` is powerful but painful.
 
 ## Dependencies
 
-- ❗ Requires `Bash` 4+
+- ❗ Requires `Bash` 4.3+
 - ❗ Requires `Git`
 
 ## ⚙️ Configuration
