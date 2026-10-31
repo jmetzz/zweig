@@ -777,11 +777,14 @@ STUB
     [[ "$output" == *"Path: "*"/else where/loose" ]]
 }
 
-@test "zg select stays put when cancelled and fails when fzf errors" {
+@test "zg select stays put when cancelled or nothing matches, and fails when fzf errors" {
     make_repo
     git worktree add -q -b outside "$TEST_ROOT/elsewhere/outside"
     stub_fzf
     run "$ZG" select
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"Switched"* ]]
+    FZF_EXIT=1 run "$ZG" select
     [ "$status" -eq 0 ]
     [[ "$output" != *"Switched"* ]]
     FZF_EXIT=2 run "$ZG" select
@@ -888,4 +891,39 @@ STUB
     run /bin/bash "$ZG" status
     [ "$status" -ne 0 ]
     [[ "$output" == *"needs bash 4.3 or newer"* ]]
+}
+
+@test "zg remove merged skips worktrees with a merge, cherry-pick or revert in progress" {
+    make_repo_with_origin
+    local op gitdir
+    for op in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD; do
+        git worktree add -q -b "op-$op" "$TEST_ROOT/elsewhere/$op"
+        gitdir="$(git -C "$TEST_ROOT/elsewhere/$op" rev-parse --absolute-git-dir)"
+        git rev-parse HEAD > "$gitdir/$op"
+    done
+    run "$ZG" remove merged --force
+    [ "$status" -eq 0 ]
+    for op in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD; do
+        [[ "$output" == *"Skipping op-$op: uncommitted work or a merge/rebase in progress"* ]]
+        [ -d "$TEST_ROOT/elsewhere/$op" ]
+    done
+}
+
+@test "zg create and create from refuse the default branch by name" {
+    make_repo
+    run "$ZG" create main
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"Name is protected: main"* ]]
+    run "$ZG" create from main
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"Branch 'main' is protected"* ]]
+    [ ! -e "$REPO/.worktrees/main" ]
+}
+
+@test "zg migrate migrates a branch whose name starts with the default branch" {
+    make_repo
+    git branch main-fix
+    run "$ZG" migrate
+    [ "$status" -eq 0 ]
+    [ "$(git -C "$REPO/.worktrees/main-fix" branch --show-current)" = "main-fix" ]
 }
