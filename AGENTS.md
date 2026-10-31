@@ -156,7 +156,7 @@ Default canonical labels (`needs-triage`, `needs-info`, `ready-for-agent`, `read
 
 ### Domain docs
 
-Single-context layout: `CONTEXT.md` + `docs/adr/` at the repo root (neither exists yet; created lazily). See `docs/agents/domain.md`.
+Single-context layout: `GLOSSARY.md` + `docs/adr/` at the repo root (`docs/adr/` is created lazily). See `docs/agents/domain.md`.
 
 ## Future Outlook
 
