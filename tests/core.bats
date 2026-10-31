@@ -1,5 +1,7 @@
 #!/usr/bin/env bats
 
+bats_require_minimum_version 1.5.0
+
 # Black-box tests: run the real `zg` entrypoint against a disposable repo and a
 # fake HOME, asserting only on output and filesystem state.
 
@@ -127,5 +129,82 @@ realdir() { (cd "$1" && pwd -P); }
     make_repo
     run "$ZG" path does-not-exist
     [ "$status" -ne 0 ]
-    [[ "$output" == *"not found"* ]]
+    [[ "$output" == *"Worktree or branch 'does-not-exist' not found."* ]]
+    [[ "$output" != *"exists without a worktree"* ]]
+}
+
+@test "zg path resolves an outside worktree whose path contains a space" {
+    make_repo
+    git worktree add -q "$TEST_ROOT/with space/ext" -b spaced
+    run "$ZG" path spaced
+    [ "$status" -eq 0 ]
+    [ "$(realdir "$output")" = "$(realdir "$TEST_ROOT/with space/ext")" ]
+}
+
+@test "zg path matches a directory name that differs from its branch" {
+    make_repo
+    git worktree add -q "$REPO/.worktrees/custom-dir" -b other-branch
+    run "$ZG" path custom-dir
+    [ "$status" -eq 0 ]
+    [ "$(realdir "$output")" = "$(realdir "$REPO/.worktrees/custom-dir")" ]
+}
+
+@test "zg path prefers the directory-name match over a branch of the same name" {
+    make_repo
+    git worktree add -q "$REPO/.worktrees/collide" -b dir-owner
+    git worktree add -q "$TEST_ROOT/elsewhere/collide" -b collide
+    run "$ZG" path collide
+    [ "$status" -eq 0 ]
+    [ "$(realdir "$output")" = "$(realdir "$REPO/.worktrees/collide")" ]
+}
+
+@test "zg path rejects relative path components" {
+    make_repo
+    mkdir -p "$REPO/.worktrees"
+    run "$ZG" path ..
+    [ "$status" -ne 0 ]
+}
+
+@test "zg switch fails for an unknown name with the error on stderr only" {
+    make_repo
+    run --separate-stderr "$ZG" switch does-not-exist
+    [ "$status" -ne 0 ]
+    [ -z "$output" ]
+    [[ "$stderr" == *"Worktree or branch 'does-not-exist' not found."* ]]
+}
+
+@test "zg path and switch hint at create when the branch has no worktree" {
+    make_repo
+    git branch lonely
+    run "$ZG" path lonely
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"Try: zg create from lonely"* ]]
+    run "$ZG" switch lonely
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"Try: zg create from lonely"* ]]
+}
+
+@test "zg path hints at prune when the worktree directory was deleted" {
+    make_repo
+    git worktree add -q "$TEST_ROOT/elsewhere/gone" -b gone
+    rm -rf "$TEST_ROOT/elsewhere/gone"
+    run "$ZG" path gone
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"zg prune metadata"* ]]
+    [[ "$output" != *"zg create from"* ]]
+}
+
+@test "shim: zg cd changes the shell directory and fails cleanly when unknown" {
+    make_repo
+    git worktree add -q "$TEST_ROOT/elsewhere/ext" -b ext-branch
+    run bash -c '
+        PATH="'"$BATS_TEST_DIRNAME"'/../bin:$PATH"
+        source "'"$BATS_TEST_DIRNAME"'/../shims/shims.sh"
+        zg cd ext-branch || exit 10
+        pwd -P
+        zg cd does-not-exist 2>/dev/null && exit 11
+        exit 0
+    '
+    [ "$status" -eq 0 ]
+    [[ "${lines[-1]}" == "$(realdir "$TEST_ROOT/elsewhere/ext")" ]]
 }
