@@ -246,16 +246,17 @@ zg_maintenance_migrate() {
     # check a branch out twice, wherever the other worktree is. Read once.
     local -A held=()
     local listing line
-    if ! listing="$(zg_helpers_checked_out_branches)"; then
+    if ! listing="$(zg_helpers_list_worktrees --all)"; then
         echo "❌ Error: Could not list worktrees." >&2
         return 1
     fi
     while IFS= read -r line; do
-        if [[ -n "$line" ]]; then held["${line%%$'\t'*}"]="${line#*$'\t'}"; fi
+        # Lines with an empty branch are detached worktrees: nothing held.
+        if [[ -n "${line%%$'\t'*}" ]]; then held["${line%%$'\t'*}"]="${line#*$'\t'}"; fi
     done <<<"$listing"
 
     local branch dir_name dir
-    for branch in $(git for-each-ref --format='%(refname:short)' refs/heads/ | grep -vE "^($ZWEIG_DEFAULT_BRANCH|HEAD)"); do
+    for branch in $(git for-each-ref --format='%(refname:short)' refs/heads/ | grep -vxE "($ZWEIG_DEFAULT_BRANCH|HEAD)"); do
         dir_name="${branch//\//__}"
         dir="$ZWEIG_WORKTREE_DIR/$dir_name"
         if [[ -n "${held[$branch]+set}" ]]; then

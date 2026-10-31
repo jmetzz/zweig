@@ -52,28 +52,14 @@ zg_helpers_worktree_exists() {
     [ -d "$ZWEIG_WORKTREE_DIR/$1" ]
 }
 
-# --- List every checked-out branch with its worktree, main checkout included ---
-# Prints one "<branch>\t<path>" line per worktree that has a branch (detached
-# and bare entries are left out). Split lines as for zg_helpers_list_worktrees.
-# Returns 1 if git can't list worktrees.
-zg_helpers_checked_out_branches() {
-    local porcelain
-    porcelain="$(git worktree list --porcelain)" || return 1
-    # substr($0, 10), not $2: worktree paths may contain spaces, and
-    # 10 = length("worktree ") + 1.
-    awk '
-        $1=="worktree" {wt=substr($0, 10)}
-        $1=="branch"   {b=$2; sub("^refs/heads/","",b); printf "%s\t%s\n", b, wt}
-    ' <<<"$porcelain"
-}
-
 # --- Print the path git has registered for a branch's worktree ---
 # The path is printed even if that directory no longer exists. Returns 1 if the
 # branch isn't checked out in any worktree, 2 if git can't list worktrees (so
 # callers don't mistake a git failure for "not checked out").
 zg_helpers_branch_worktree_path() {
     local branch="$1" listing line
-    listing="$(zg_helpers_checked_out_branches)" || return 2
+    [[ -n "$branch" ]] || return 1
+    listing="$(zg_helpers_list_worktrees --all)" || return 2
     while IFS= read -r line; do
         if [[ "${line%%$'\t'*}" == "$branch" ]]; then
             printf '%s\n' "${line#*$'\t'}"
@@ -84,8 +70,10 @@ zg_helpers_branch_worktree_path() {
 }
 
 # --- List every linked worktree of the repo, wherever it lives on disk ---
-# Prints one "<branch>\t<path>" line per worktree, skipping the main worktree
-# (always the first porcelain record, wherever it's run from) and bare entries.
+# Usage: zg_helpers_list_worktrees [--all]
+# Prints one "<branch>\t<path>" line per worktree, skipping bare entries and,
+# unless --all is given, the main worktree (always the first porcelain record,
+# wherever it's run from).
 # The branch is empty for a detached HEAD. Paths are printed even if the
 # directory no longer exists. Returns 1 if git can't list worktrees.
 #
@@ -94,12 +82,14 @@ zg_helpers_branch_worktree_path() {
 # branch="${line%%$'\t'*}" path="${line#*$'\t'}". Not `IFS=$'\t' read`: tab is
 # IFS whitespace, so read would drop an empty (detached) branch field.
 zg_helpers_list_worktrees() {
-    local porcelain
+    local porcelain first=2
+    [[ "${1:-}" == "--all" ]] && first=1
     porcelain="$(git worktree list --porcelain)" || return 1
-    # substr($0, 10): see zg_helpers_branch_worktree_path.
-    # n counts records; record 1 is the main worktree, so only n > 1 is printed.
-    awk '
-        function flush() { if (n > 1 && wt != "" && !bare) printf "%s\t%s\n", br, wt }
+    # substr($0, 10), not $2: worktree paths may contain spaces, and
+    # 10 = length("worktree ") + 1.
+    # n counts records; record 1 is the main worktree, printed only with --all.
+    awk -v first="$first" '
+        function flush() { if (n >= first && wt != "" && !bare) printf "%s\t%s\n", br, wt }
         $1=="worktree" {flush(); n++; wt=substr($0, 10); br=""; bare=0}
         $1=="branch"   {br=$2; sub("^refs/heads/","",br)}
         $1=="bare"     {bare=1}
@@ -159,10 +149,14 @@ zg_helpers_ensure_branch_free() {
 
 # --- True if a worktree has uncommitted work or a git operation in progress ---
 # Uncommitted work includes untracked files (ignored ones are not counted).
-# Operations: merge, cherry-pick, revert or rebase.
+# Operations: merge, cherry-pick, revert or rebase. If git can't read the
+# worktree at all, it also counts as busy: callers use this to decide what is
+# safe to force-remove, so unknown state must err on the side of keeping it.
 zg_helpers_worktree_busy() {
     local dir="$1" gitdir
-    [[ -z "$(git -C "$dir" status --porcelain --ignore-submodules 2>/dev/null)" ]] || return 0
+    local status
+    status="$(git -C "$dir" status --porcelain --ignore-submodules 2>/dev/null)" || return 0
+    [[ -z "$status" ]] || return 0
     gitdir="$(git -C "$dir" rev-parse --absolute-git-dir 2>/dev/null)" || return 0
     [[ -e "$gitdir/MERGE_HEAD" || -e "$gitdir/CHERRY_PICK_HEAD" || -e "$gitdir/REVERT_HEAD" \
         || -d "$gitdir/rebase-merge" || -d "$gitdir/rebase-apply" ]]
@@ -195,9 +189,14 @@ zg_helpers_resolve_worktree() {
 # --- Report why a worktree identifier did not resolve (stderr only) ---
 # Uses local refs only: no fetch, so a typo never waits on the network.
 zg_helpers_report_worktree_not_found() {
-    local target="$1" registered
+    local target="$1" registered rc=0
+    registered="$(zg_helpers_branch_worktree_path "$target")" || rc=$?
+    if [[ $rc -eq 2 ]]; then
+        echo "❌ Error: Could not list worktrees, so '$target' could not be looked up." >&2
+        return 0
+    fi
     echo "❌ Worktree or branch '$target' not found." >&2
-    if registered="$(zg_helpers_branch_worktree_path "$target")"; then
+    if [[ $rc -eq 0 ]]; then
         echo "ℹ️ Branch '$target' is registered to a missing directory ($registered). Try: zg prune metadata" >&2
     elif git show-ref --verify --quiet "refs/heads/$target" || \
          git show-ref --verify --quiet "refs/remotes/origin/$target"; then

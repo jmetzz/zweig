@@ -307,7 +307,7 @@ zg_core_remove_merged() {
             # sweep reaches worktrees other tools made (a fresh branch with no
             # commits counts as merged), so never hand it one holding work.
             if zg_helpers_worktree_busy "$dir"; then
-                echo "⏭️  Skipping $branch: uncommitted work or a merge/rebase in progress ($dir). Finalize it by hand: zg finalize $branch"
+                echo "⏭️  Skipping $branch: uncommitted work or a merge/rebase in progress, or git can't read it ($dir). Finalize it by hand: zg finalize $branch"
                 skipped=$((skipped + 1)); continue
             fi
             # finalize resolves by name, and a directory named after the branch
@@ -316,7 +316,8 @@ zg_core_remove_merged() {
             # Physical paths, so symlinked prefixes (macOS /var) still match.
             target="$(zg_helpers_resolve_worktree "$branch")" || target=""
             target_real="" dir_real="$(cd "$dir" && pwd -P)"
-            [[ -z "$target" ]] || target_real="$(cd "$target" && pwd -P)"
+            # A cd failure (the directory vanished meanwhile) just means no match.
+            if [[ -n "$target" ]]; then target_real="$(cd "$target" 2>/dev/null && pwd -P)" || target_real=""; fi
             if [[ "$target_real" != "$dir_real" ]]; then
                 echo "❌ Not finalizing $branch: its name resolves to ${target:-nothing}, not $dir." >&2
                 failed=$((failed + 1)); continue
