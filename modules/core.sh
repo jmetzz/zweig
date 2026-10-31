@@ -153,7 +153,7 @@ zg_core_switch() {
 
     local dir
     if ! dir="$(zg_helpers_resolve_worktree "$target")"; then
-        zg_helpers_worktree_not_found "$target"
+        zg_helpers_report_worktree_not_found "$target"
         return 1
     fi
 
@@ -164,12 +164,13 @@ zg_core_switch() {
 
 # Resolve worktree directory from name or branch (prints path)
 zg_core_path() {
-  local target="$1"
-  [[ -n "$target" ]] || { echo "❌ Missing worktree or branch name" >&2; return 2; }
+    local target="$1"
+    [[ -n "$target" ]] || { echo "❌ Missing worktree or branch name" >&2; return 2; }
 
-  zg_helpers_resolve_worktree "$target" && return 0
-  zg_helpers_worktree_not_found "$target"
-  return 1
+    if ! zg_helpers_resolve_worktree "$target"; then
+        zg_helpers_report_worktree_not_found "$target"
+        return 1
+    fi
 }
 
 # --- Remove worktree (keep branch) ---

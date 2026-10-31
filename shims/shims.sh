@@ -10,9 +10,7 @@ zg() {
       return 2
     fi
     local dir
-    if ! dir="$(command zg path "$target")"; then
-      return $?
-    fi
+    dir="$(command zg path "$target")" || return $?
     cd "$dir" || return
   elif [[ "$1" == "create" ]]; then
     # This file is sourced as-is by both bash and zsh, and zsh's arrays are

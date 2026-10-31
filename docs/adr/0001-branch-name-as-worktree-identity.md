@@ -24,8 +24,9 @@ a large class of real worktrees.
 ## Decision
 
 A worktree is identified by its **branch name**. Every command that takes a
-worktree argument resolves it through one shared resolver
-(`zg_helpers_resolve_worktree`):
+worktree argument will resolve it through one shared resolver
+(`zg_helpers_resolve_worktree`). `switch` and `path` use it as of #3; the
+remaining commands move onto it in #4, #5 and #15.
 
 1. **Fast path:** if `$ZWEIG_WORKTREE_DIR/<identifier>` is a directory, use it.
    This costs no subprocess and covers the common case of a worktree zg created.
@@ -42,11 +43,17 @@ differ from the branch (e.g. migrated `feature__foo`).
 - `switch` and `path` find worktrees anywhere on disk. #4, #5 and #15 move the
   remaining commands onto the same resolver.
 - Git is the source of truth for which worktrees exist; zg keeps no registry.
-- If a directory under `$ZWEIG_WORKTREE_DIR` happens to share its name with a
-  *different* branch, the fast path wins. This is accepted: zg creates those
-  directories itself, and it names them after the branch.
+- If a directory under `$ZWEIG_WORKTREE_DIR` shares its name with a
+  *different* branch, the fast path wins and that branch is unreachable by
+  name. Most zg-created directories are named after their branch, but not all:
+  `zg migrate` flattens `a/b` to `a__b`, and `zg create from-pr` uses the PR
+  number, so a branch literally named `a__b` or `42` can be shadowed. This is
+  accepted: such names are rare, and the directory stays reachable by its
+  directory name.
 - Detached-HEAD worktrees have no branch and are only reachable via the fast
-  path for now.
+  path (by directory name) for now.
+- Identifiers containing `.` or `..` path components are rejected, so a name
+  can never resolve outside `$ZWEIG_WORKTREE_DIR`.
 
 ## Alternatives considered
 

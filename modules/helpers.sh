@@ -45,19 +45,39 @@ zg_helpers_branch_exists() {
     git show-ref --quiet refs/heads/"$1" || git show-ref --quiet refs/remotes/origin/"$1"
 }
 
+# Only checks for a directory under ZWEIG_WORKTREE_DIR. To look a worktree up
+# by name or branch wherever it lives, use zg_helpers_resolve_worktree.
 zg_helpers_worktree_exists() {
     [ -d "$ZWEIG_WORKTREE_DIR/$1" ]
+}
+
+# --- Print the path git has registered for a branch's worktree ---
+# Prints nothing (and returns 1) if the branch isn't checked out in any
+# worktree. The path is printed even if that directory no longer exists.
+zg_helpers_branch_worktree_path() {
+    local branch="$1" path
+    # substr($0, 10), not $2: worktree paths may contain spaces, and
+    # 10 = length("worktree ") + 1.
+    path="$(git worktree list --porcelain | awk -v b="$branch" '
+        $1=="worktree" {wt=substr($0, 10)}
+        $1=="branch"   {sub("^refs/heads/","",$2); if ($2==b) {print wt; exit}}
+    ')"
+    [[ -n "$path" ]] || return 1
+    printf '%s\n' "$path"
 }
 
 # --- Resolve a worktree identifier to its path (prints the path) ---
 # The identifier is a branch name (canonical identity, see docs/adr/0001).
 # Fast path: a directory of that name under ZWEIG_WORKTREE_DIR (no subprocess).
-# Fallback: match the branch in `git worktree list --porcelain`, which finds
-# worktrees anywhere on disk, including ones other tools created.
+# It wins even if that directory holds a different branch (accepted trade-off,
+# see the ADR). Fallback: the branch's worktree from `git worktree list`,
+# which finds worktrees anywhere on disk, including ones other tools created.
 # Returns 1 when nothing matches; prints nothing in that case.
 zg_helpers_resolve_worktree() {
     local target="$1"
     [[ -n "$target" ]] || return 1
+    # Never let an identifier walk out of the worktree dir (e.g. "..").
+    [[ "/$target/" != */../* && "/$target/" != */./* ]] || return 1
 
     if [[ -d "$ZWEIG_WORKTREE_DIR/$target" ]]; then
         printf '%s\n' "$ZWEIG_WORKTREE_DIR/$target"
@@ -65,22 +85,20 @@ zg_helpers_resolve_worktree() {
     fi
 
     local worktree_path
-    worktree_path="$(git worktree list --porcelain | awk -v b="$target" '
-        $1=="worktree" {wt=substr($0, 10)}
-        $1=="branch"   {sub("^refs/heads/","",$2); if ($2==b) {print wt; exit}}
-    ')"
-
-    [[ -n "$worktree_path" && -d "$worktree_path" ]] || return 1
+    worktree_path="$(zg_helpers_branch_worktree_path "$target")" || return 1
+    [[ -d "$worktree_path" ]] || return 1
     printf '%s\n' "$worktree_path"
 }
 
-# --- Explain why a worktree identifier did not resolve (stderr) ---
-zg_helpers_worktree_not_found() {
-    local target="$1"
+# --- Report why a worktree identifier did not resolve (stderr only) ---
+# Uses local refs only: no fetch, so a typo never waits on the network.
+zg_helpers_report_worktree_not_found() {
+    local target="$1" registered
     echo "❌ Worktree or branch '$target' not found." >&2
-    zg_helpers_fetch_origin >/dev/null 2>&1 || true
-    if git show-ref --verify --quiet "refs/heads/$target" || \
-       git show-ref --verify --quiet "refs/remotes/origin/$target"; then
+    if registered="$(zg_helpers_branch_worktree_path "$target")"; then
+        echo "ℹ️ Branch '$target' is registered to a missing directory ($registered). Try: zg prune metadata" >&2
+    elif git show-ref --verify --quiet "refs/heads/$target" || \
+         git show-ref --verify --quiet "refs/remotes/origin/$target"; then
         echo "ℹ️ Branch '$target' exists without a worktree. Try: zg create from $target" >&2
     fi
 }
@@ -152,6 +170,8 @@ Worktree Core Lifecycle:
   zg (remove|rm) <worktree>         Remove a worktree but keeps the branch.
   zg remove merged                  Remove worktrees whose branches are merged into the default branch.
   zg (switch|cd) <worktree|branch>  Enter a worktree or switch to one by branch name.
+                                     Finds worktrees anywhere on disk; detached ones
+                                     only by their directory name under the worktree dir.
   zg finalize <branch>              Final cleanup after merge (removes worktree and branch).
   zg rebuild <worktree>             Rebuild a worktree (removes and re-adds).
   zg protect <worktree>             Protect a worktree from accidental deletion.
