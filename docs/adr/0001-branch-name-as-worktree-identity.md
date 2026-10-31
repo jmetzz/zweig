@@ -24,13 +24,12 @@ a large class of real worktrees.
 ## Decision
 
 A worktree is identified by its **branch name**. Every command that takes a
-worktree argument will resolve it through one shared resolver
-(`zg_helpers_resolve_worktree`). `switch` and `path` use it as of #3;
-`remove`, `protect`, `unprotect`, `finalize` and `rebuild` as of #4; `sync
-<worktree>` as of #5; the remaining commands move onto it in #15. Bulk
-commands (`status`, `prune trees`, `sync all`) take no worktree argument:
-as of #5 they enumerate every linked worktree from
-`git worktree list --porcelain` instead of globbing `$ZWEIG_WORKTREE_DIR`.
+worktree argument resolves it through one shared resolver
+(`zg_helpers_resolve_worktree`). Bulk commands, which take no worktree
+argument, enumerate every linked worktree from `git worktree list --porcelain`
+(`zg_helpers_list_worktrees`) instead of globbing `$ZWEIG_WORKTREE_DIR`.
+`remove merged`, `select`, `migrate` and `sync current` still assume
+`$ZWEIG_WORKTREE_DIR` and move over in #15.
 
 1. **Fast path:** if `$ZWEIG_WORKTREE_DIR/<identifier>` is a directory, use it.
    This costs no subprocess and covers the common case of a worktree zg created.
@@ -44,10 +43,8 @@ differ from the branch (e.g. migrated `feature__foo`).
 
 ## Consequences
 
-- `switch`, `path`, `remove`, `protect`, `unprotect`, `finalize`, `rebuild`
-  and `sync <worktree>` find worktrees anywhere on disk, and `status`,
-  `prune` and `sync all` sweep all of them. #15 moves the remaining commands
-  onto the same resolver.
+- Commands find and sweep worktrees anywhere on disk, apart from the #15
+  exceptions above.
 - Git is the source of truth for which worktrees exist; zg keeps no registry.
 - If a directory under `$ZWEIG_WORKTREE_DIR` shares its name with a
   *different* branch, the fast path wins and that branch is unreachable by
@@ -57,7 +54,9 @@ differ from the branch (e.g. migrated `feature__foo`).
   accepted: such names are rare, and the directory stays reachable by its
   directory name.
 - Detached-HEAD worktrees have no branch and are only reachable via the fast
-  path (by directory name) for now.
+  path (by directory name) for now. Bulk sweeps list them in `status` but
+  skip them in `sync all` and `prune trees`: they have no branch to rebase or
+  look up on the remote.
 - Identifiers containing `.` or `..` path components are rejected, so the fast
   path can't be used to traverse out of `$ZWEIG_WORKTREE_DIR`. (The fallback
   still resolves worktrees anywhere on disk, by branch.)

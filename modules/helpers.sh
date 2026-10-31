@@ -68,20 +68,25 @@ zg_helpers_branch_worktree_path() {
 
 # --- List every linked worktree of the repo, wherever it lives on disk ---
 # Prints one "<branch>\t<path>" line per worktree, skipping the main worktree
-# (always the first porcelain record) and bare entries. The branch is empty for
-# a detached HEAD. Refs can't contain a tab, so split on the first one with
-# ${line%%$'\t'*} / ${line#*$'\t'}. Not `IFS=$'\t' read`: tab is IFS whitespace,
-# so read would drop an empty (detached) branch field. Paths are printed even if the directory no
-# longer exists; callers skip those.
+# (always the first porcelain record, wherever it's run from) and bare entries.
+# The branch is empty for a detached HEAD. Paths are printed even if the
+# directory no longer exists. Returns 1 if git can't list worktrees.
+#
+# Refs can't contain a tab, so callers split on the first one:
+# branch="${line%%$'\t'*}" path="${line#*$'\t'}". Not `IFS=$'\t' read`: tab is
+# IFS whitespace, so read would drop an empty (detached) branch field.
 zg_helpers_list_worktrees() {
+    local porcelain
+    porcelain="$(git worktree list --porcelain)" || return 1
     # substr($0, 10): see zg_helpers_branch_worktree_path.
-    git worktree list --porcelain | awk '
+    # n counts records; record 1 is the main worktree, so only n > 1 is printed.
+    awk '
         function flush() { if (n > 1 && wt != "" && !bare) printf "%s\t%s\n", br, wt }
         $1=="worktree" {flush(); n++; wt=substr($0, 10); br=""; bare=0}
         $1=="branch"   {br=$2; sub("^refs/heads/","",br)}
         $1=="bare"     {bare=1}
         END            {flush()}
-    '
+    ' <<<"$porcelain"
 }
 
 # --- Resolve a worktree identifier to its path (prints the path) ---
@@ -143,27 +148,24 @@ zg_helpers_inside_dir() {
     [[ "$here" == "$dir" || "$here" == "$dir"/* ]]
 }
 
-# Internal helper to check if branch is protected
+# --- True if a worktree identifier (branch or directory name) is protected ---
+# The default branch is always protected, even without a worktree. Otherwise
+# its worktree, wherever it lives, must be; an identifier that resolves to no
+# worktree counts as not protected, since there is nothing on disk to protect.
 zg_helpers_is_protected() {
-    local wtree="$1" dir
-    # Default branch is always protected
-    if [[ "$wtree" == "$ZWEIG_DEFAULT_BRANCH" ]]; then
-        return 0
-    fi
-    # Or its worktree, wherever it lives, is protected. An identifier that
-    # resolves to no worktree counts as not protected: there is nothing on disk
-    # to protect.
-    dir="$(zg_helpers_resolve_worktree "$wtree")" || return 1
-    zg_helpers_dir_is_protected "" "$dir"
+    local wtree="$1" dir=""
+    dir="$(zg_helpers_resolve_worktree "$wtree")" || dir=""
+    zg_helpers_dir_is_protected "$wtree" "$dir"
 }
 
-# --- True if the worktree at a directory is protected ---
-# Takes the branch checked out there (empty if unknown or detached) and the
-# directory. Protected means it holds the default branch or carries a
-# .protected marker. Used directly by bulk sweeps, which already know both.
+# --- The protection rule: one place for every command ---
+# Takes a branch name and the worktree directory (empty if there is none).
+# Protected means the branch is the default branch, or the directory carries a
+# .protected marker. Bulk sweeps call this directly with what they enumerated.
 zg_helpers_dir_is_protected() {
     local branch="$1" dir="$2"
-    [[ "$branch" == "$ZWEIG_DEFAULT_BRANCH" || -f "$dir/.protected" ]]
+    [[ "$branch" == "$ZWEIG_DEFAULT_BRANCH" ]] && return 0
+    [[ -n "$dir" && -f "$dir/.protected" ]]
 }
 
 # --- Seed a newly created worktree with local, usually-gitignored context files ---
@@ -229,12 +231,15 @@ Worktree Core Lifecycle:
   zg unprotect <worktree>           Remove protection marker from a worktree.
 
 Maintenance:
-  (status, sync and prune act on every worktree of the repo, wherever it lives on disk)
-  zg status                         Show sync status of all worktrees.
+  zg status                         Show sync status of every worktree of the repo,
+                                     wherever it lives on disk.
   zg sync [all|current|<wtree>]     Sync worktrees with the default branch (or specified).
+                                     'all' covers every worktree of the repo, wherever
+                                     it lives on disk; detached ones are skipped.
   zg rebase                         Rebase the current worktree onto the default branch.
   zg prune metadata                 Prune broken worktree metadata.
-  zg prune trees                    Prune worktrees for deleted remote branches.
+  zg prune trees                    Prune worktrees for deleted remote branches, covering
+                                     every worktree of the repo, wherever it lives on disk.
   zg migrate                        Migrate existing branches to worktrees.
 
 Meta:

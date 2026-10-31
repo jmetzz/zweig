@@ -406,9 +406,11 @@ make_repo_with_origin() {
     [ "$status" -eq 0 ]
     [[ "$output" == *"- ext: ↑0 ↓0"* ]]
     [[ "$output" == *"- foo: ↑0 ↓0"* ]]
-    [[ "$output" != *"- repo:"* ]]
+    [[ "$output" != *"- main:"* ]]
 }
 
+# Regression guard: prune metadata is plain `git worktree prune`, already
+# location-agnostic before #5.
 @test "zg prune metadata drops an outside worktree whose directory was deleted" {
     make_repo
     git worktree add -q -b ext "$TEST_ROOT/outside"
@@ -487,4 +489,127 @@ make_repo_with_origin() {
     run bash -c 'echo y | "$1" prune trees' _ "$ZG"
     [ "$status" -eq 0 ]
     [ -d "$TEST_ROOT/out side" ]
+}
+
+@test "zg status lists the other worktrees, not the main checkout, when run from a linked worktree" {
+    make_repo_with_origin
+    git worktree add -q -b ext "$TEST_ROOT/outside"
+    "$ZG" create foo >/dev/null
+    cd "$TEST_ROOT/outside"
+    run "$ZG" status
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"- ext: ↑0 ↓0"* ]]
+    [[ "$output" == *"- foo: ↑0 ↓0"* ]]
+    [[ "$output" != *"- main:"* ]]
+}
+
+@test "zg status, prune trees and sync all succeed with no linked worktrees" {
+    make_repo_with_origin
+    run "$ZG" status
+    [ "$status" -eq 0 ]
+    run bash -c 'echo y | "$1" prune trees' _ "$ZG"
+    [ "$status" -eq 0 ]
+    run "$ZG" sync all
+    [ "$status" -eq 0 ]
+}
+
+@test "zg status and prune trees warn about a worktree whose directory is missing" {
+    make_repo_with_origin
+    git worktree add -q -b ext "$TEST_ROOT/outside"
+    rm -rf "$TEST_ROOT/outside"
+    run --separate-stderr "$ZG" status
+    [ "$status" -eq 0 ]
+    [[ "$stderr" == *"Skipping ext: directory missing"*"zg prune metadata"* ]]
+    run --separate-stderr bash -c 'echo y | "$1" prune trees' _ "$ZG"
+    [ "$status" -eq 0 ]
+    [[ "$stderr" == *"Skipping ext: directory missing"* ]]
+}
+
+@test "zg sync all fails when a worktree's directory is missing but syncs the rest" {
+    make_repo_with_origin
+    git worktree add -q -b ext "$TEST_ROOT/outside"
+    "$ZG" create foo >/dev/null
+    rm -rf "$TEST_ROOT/outside"
+    git commit -q --allow-empty -m "chore: advance main"
+    git push -q origin main
+    run --separate-stderr "$ZG" sync all
+    [ "$status" -ne 0 ]
+    [[ "$stderr" == *"Skipping ext: directory missing"* ]]
+    git -C "$REPO/.worktrees/foo" merge-base --is-ancestor origin/main HEAD
+}
+
+@test "zg sync all skips a detached worktree and leaves its HEAD alone" {
+    make_repo_with_origin
+    git worktree add -q --detach "$TEST_ROOT/parked"
+    before="$(git -C "$TEST_ROOT/parked" rev-parse HEAD)"
+    git commit -q --allow-empty -m "chore: advance main"
+    git push -q origin main
+    run "$ZG" sync all
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Skipping detached worktree: parked"* ]]
+    [ "$(git -C "$TEST_ROOT/parked" rev-parse HEAD)" = "$before" ]
+}
+
+@test "zg sync all fails on a dirty outside worktree but still syncs the others" {
+    make_repo_with_origin
+    echo one > file.txt
+    git add file.txt
+    git commit -q -m "chore: add file"
+    git push -q origin main
+    git worktree add -q -b ext "$TEST_ROOT/outside"
+    "$ZG" create foo >/dev/null
+    echo dirty > "$TEST_ROOT/outside/file.txt"
+    git commit -q --allow-empty -m "chore: advance main"
+    git push -q origin main
+    run --separate-stderr "$ZG" sync all
+    [ "$status" -ne 0 ]
+    [[ "$stderr" == *"'ext' has uncommitted changes"* ]]
+    [[ "$stderr" == *"Some worktrees failed to sync"* ]]
+    git -C "$REPO/.worktrees/foo" merge-base --is-ancestor origin/main HEAD
+    ! git -C "$TEST_ROOT/outside" merge-base --is-ancestor origin/main HEAD
+}
+
+@test "zg sync reports an unknown worktree on stderr and fails" {
+    make_repo_with_origin
+    run --separate-stderr "$ZG" sync nope
+    [ "$status" -ne 0 ]
+    [[ "$stderr" == *"Worktree or branch 'nope' not found"* ]]
+}
+
+@test "zg status and prune trees handle an outside worktree on a slash-named branch" {
+    make_repo_with_origin
+    git worktree add -q -b feature/x "$TEST_ROOT/outside"
+    git push -q origin feature/x
+    run "$ZG" status
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"- feature/x: ↑0 ↓0"* ]]
+    git push -q origin --delete feature/x
+    run bash -c 'echo y | "$1" prune trees' _ "$ZG"
+    [ "$status" -eq 0 ]
+    [ ! -e "$TEST_ROOT/outside" ]
+    ! git show-ref --verify --quiet refs/heads/feature/x
+}
+
+@test "zg prune trees --force deletes an unmerged branch whose remote is gone" {
+    make_repo_with_origin
+    git worktree add -q -b ext "$TEST_ROOT/outside"
+    git -C "$TEST_ROOT/outside" commit -q --allow-empty -m "feat: unmerged work"
+    git push -q origin ext
+    git push -q origin --delete ext
+    run "$ZG" prune trees --force
+    [ "$status" -eq 0 ]
+    [ ! -e "$TEST_ROOT/outside" ]
+    ! git show-ref --verify --quiet refs/heads/ext
+}
+
+@test "zg prune trees fails on a locked worktree but still prunes the others" {
+    make_repo_with_origin
+    git worktree add -q -b ext "$TEST_ROOT/outside"
+    git worktree lock "$TEST_ROOT/outside"
+    "$ZG" create foo >/dev/null
+    run --separate-stderr bash -c 'echo y | "$1" prune trees' _ "$ZG"
+    [ "$status" -ne 0 ]
+    [[ "$stderr" == *"Failed to remove worktree dir: $(realdir "$TEST_ROOT/outside")"* ]]
+    [ -d "$TEST_ROOT/outside" ]
+    [ ! -e "$REPO/.worktrees/foo" ]
 }
