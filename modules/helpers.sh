@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Zweig Helpers Module - helpers.sh
 # Provides reusable helper functions for the other modules.
-# Requires: bash 4.3+ (zg_helpers_load_worktrees uses namerefs)
+# Requires: bash 4.3+ (namerefs: zg_helpers_load_worktrees,
+# zg_helpers_load_report_worktrees, zg_helpers_report_mark)
 
 set -u
 
@@ -83,7 +84,11 @@ zg_helpers_branch_worktree_path() {
 # IFS whitespace, so read would drop an empty (detached) branch field.
 zg_helpers_list_worktrees() {
     local porcelain first=2
-    [[ "${1:-}" == "--all" ]] && first=1
+    case "${1:-}" in
+        "") ;;
+        --all) first=1 ;;
+        *) echo "❌ Internal error: zg_helpers_list_worktrees got '$1'." >&2; return 1 ;;
+    esac
     porcelain="$(git worktree list --porcelain)" || return 1
     # substr($0, 10), not $2: worktree paths may contain spaces, and
     # 10 = length("worktree ") + 1.
@@ -110,6 +115,8 @@ zg_helpers_load_worktrees() {
     local -n _zg_branches="$1" _zg_dirs="$2"
     local listing line branch dir rc=0
     _zg_branches=() _zg_dirs=()
+    # list_worktrees rejects anything but --all (a typo must not silently
+    # drop the main checkout); its error is on stderr already.
     if ! listing="$(zg_helpers_list_worktrees "${3:-}")"; then
         echo "❌ Error: Could not list worktrees." >&2
         return 1
@@ -121,7 +128,7 @@ zg_helpers_load_worktrees() {
         if [[ -d "$dir" ]]; then
             _zg_branches+=("$branch") _zg_dirs+=("$dir")
         else
-            echo "⚠️ Skipping $(zg_helpers_worktree_label "$branch" "$dir"): directory missing ($dir). Try: zg prune metadata" >&2
+            echo "⚠️ Skipping $(zg_helpers_worktree_short_label "$branch" "$dir"): directory missing ($dir). Try: zg prune metadata" >&2
             rc=2
         fi
     done <<<"$listing"
@@ -130,66 +137,103 @@ zg_helpers_load_worktrees() {
 
 # --- Name a worktree in messages (warnings, skip and sync lines) ---
 # Its branch, or its directory name if detached: short, and points at the path.
-# Reports (list, status, select) use zg_helpers_worktree_name instead.
-zg_helpers_worktree_label() {
+# See also zg_helpers_worktree_report_name, used by list, status and select.
+zg_helpers_worktree_short_label() {
     local branch="$1" dir="$2"
     if [[ -n "$branch" ]]; then printf '%s\n' "$branch"; else basename "$dir"; fi
 }
 
 # --- Name a worktree in reports (list, status, select) ---
-# Its branch, or "(detached: <sha7>)" for a detached HEAD.
-zg_helpers_worktree_name() {
-    local branch="$1" dir="$2"
+# Usage: zg_helpers_worktree_report_name <branch> <dir> [<sha7>]
+# Its branch, or "(detached: <sha7>)" for a detached HEAD; the commit is looked
+# up when not given. See also zg_helpers_worktree_short_label, for messages.
+zg_helpers_worktree_report_name() {
+    local branch="$1" dir="$2" sha7="${3:-}"
     if [[ -n "$branch" ]]; then
         printf '%s\n' "$branch"
-    else
-        printf '(detached: %s)\n' "$(git -C "$dir" rev-parse --short=7 HEAD 2>/dev/null || echo unknown)"
+        return 0
     fi
+    [[ -n "$sha7" ]] || sha7="$(git -C "$dir" rev-parse --short=7 HEAD 2>/dev/null || echo unknown)"
+    printf '(detached: %s)\n' "$sha7"
 }
 
 # --- Load every worktree for a report: main checkout first, the rest by name ---
-# Usage: zg_helpers_load_report_worktrees <names-array> <dirs-array> <current-var>
-# Names come from zg_helpers_worktree_name. <current-var> gets the index of the
-# worktree the user is in, or -1. Same return codes and missing directory
-# warnings as zg_helpers_load_worktrees.
+# Usage: zg_helpers_load_report_worktrees <names-array> <dirs-array> <heads-array> <current-var>
+# Names come from zg_helpers_worktree_report_name; heads are short (7-char)
+# commit ids. <current-var> gets the index of the worktree the user is in, or
+# -1. Rows with equal names keep path order. Same return codes and missing
+# directory warnings as zg_helpers_load_worktrees.
 zg_helpers_load_report_worktrees() {
-    local -n _zg_names="$1" _zg_rdirs="$2" _zg_current="$3"
-    # Locals are prefixed: an unprefixed "dirs" would shadow the caller's array
-    # that the _zg_rdirs nameref points at.
-    local _zg_rep_branches _zg_rep_dirs i line top sorted="" rc=0
-    _zg_names=() _zg_rdirs=() _zg_current=-1
-    zg_helpers_load_worktrees _zg_rep_branches _zg_rep_dirs --all || rc=$?
-    [[ $rc -ne 1 ]] || return 1
-    for ((i = 0; i < ${#_zg_rep_dirs[@]}; i++)); do
-        if ((i == 0)); then
-            _zg_names+=("$(zg_helpers_worktree_name "${_zg_rep_branches[0]}" "${_zg_rep_dirs[0]}")")
-            _zg_rdirs+=("${_zg_rep_dirs[0]}")
+    local -n _zg_names="$1" _zg_rdirs="$2" _zg_rheads="$3" _zg_current="$4"
+    # Every local is prefixed: an unprefixed one (say "dirs") would shadow the
+    # caller's variable of that name, which the namerefs above point at.
+    local _zg_rep_branches _zg_rep_dirs _zg_rep_i _zg_rep_line _zg_rep_path _zg_rep_top
+    local _zg_rep_main="" _zg_rep_porcelain _zg_rep_sorted="" _zg_rep_rc=0
+    local -A _zg_rep_head_of=()
+    _zg_names=() _zg_rdirs=() _zg_rheads=() _zg_current=-1
+    zg_helpers_load_worktrees _zg_rep_branches _zg_rep_dirs --all || _zg_rep_rc=$?
+    [[ $_zg_rep_rc -ne 1 ]] || return 1
+
+    # One more porcelain read for what the listing leaves out: the main entry's
+    # path (the first record, even when it is a bare repo the listing drops)
+    # and each worktree's HEAD.
+    if ! _zg_rep_porcelain="$(git worktree list --porcelain)"; then
+        echo "❌ Error: Could not list worktrees." >&2
+        return 1
+    fi
+    while IFS= read -r _zg_rep_line; do
+        case "$_zg_rep_line" in
+            "worktree "*)
+                _zg_rep_path="${_zg_rep_line#worktree }"
+                [[ -n "$_zg_rep_main" ]] || _zg_rep_main="$_zg_rep_path" ;;
+            "HEAD "*) _zg_rep_head_of["$_zg_rep_path"]="${_zg_rep_line:5:7}" ;;
+        esac
+    done <<<"$_zg_rep_porcelain"
+
+    local _zg_rep_name _zg_rep_head
+    for ((_zg_rep_i = 0; _zg_rep_i < ${#_zg_rep_dirs[@]}; _zg_rep_i++)); do
+        _zg_rep_path="${_zg_rep_dirs[_zg_rep_i]}"
+        _zg_rep_head="${_zg_rep_head_of[$_zg_rep_path]:-unknown}"
+        _zg_rep_name="$(zg_helpers_worktree_report_name "${_zg_rep_branches[_zg_rep_i]}" "$_zg_rep_path" "$_zg_rep_head")"
+        if [[ "$_zg_rep_path" == "$_zg_rep_main" ]]; then
+            # The main checkout leads, unsorted. Only it: in a bare repo the
+            # first row is just the first linked worktree and gets sorted.
+            _zg_names=("$_zg_rep_name" "${_zg_names[@]}")
+            _zg_rdirs=("$_zg_rep_path" "${_zg_rdirs[@]}")
+            _zg_rheads=("$_zg_rep_head" "${_zg_rheads[@]}")
         else
-            # "<name>\t<index>": names can't contain a tab, so the index splits off cleanly.
-            sorted+="$(zg_helpers_worktree_name "${_zg_rep_branches[i]}" "${_zg_rep_dirs[i]}")"$'\t'"$i"$'\n'
+            # "<name>\t<dir>": names can't contain a tab (paths with one are
+            # unsupported, see zg_helpers_list_worktrees), so it splits cleanly.
+            _zg_rep_sorted+="$_zg_rep_name"$'\t'"$_zg_rep_path"$'\n'
         fi
     done
-    if [[ -n "$sorted" ]]; then
+    if [[ -n "$_zg_rep_sorted" ]]; then
         # Case-insensitive byte order: alphabetical, and the same in every locale.
-        sorted="$(LC_ALL=C sort -f <<<"${sorted%$'\n'}")"
-        while IFS= read -r line; do
-            _zg_names+=("${line%$'\t'*}")
-            _zg_rdirs+=("${_zg_rep_dirs[${line##*$'\t'}]}")
-        done <<<"$sorted"
+        _zg_rep_sorted="$(LC_ALL=C sort -f <<<"${_zg_rep_sorted%$'\n'}")"
+        while IFS= read -r _zg_rep_line; do
+            _zg_rep_path="${_zg_rep_line#*$'\t'}"
+            _zg_names+=("${_zg_rep_line%%$'\t'*}")
+            _zg_rdirs+=("$_zg_rep_path")
+            _zg_rheads+=("${_zg_rep_head_of[$_zg_rep_path]:-unknown}")
+        done <<<"$_zg_rep_sorted"
     fi
 
     # The current worktree is the one whose top level the user is in. Physical
     # paths, so symlinked prefixes (macOS /var) can't hide a match; a plain
     # prefix test would also wrongly mark the main checkout from inside a
     # linked worktree nested under it (e.g. .worktrees/foo).
-    top="$(git rev-parse --show-toplevel 2>/dev/null)" && top="$(cd "$top" && pwd -P)" || top=""
-    for ((i = 0; i < ${#_zg_rdirs[@]}; i++)); do
-        if [[ -n "$top" && "$(cd "${_zg_rdirs[i]}" 2>/dev/null && pwd -P)" == "$top" ]]; then
-            _zg_current=$i
+    _zg_rep_top=""
+    if _zg_rep_top="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+        _zg_rep_top="$(cd "$_zg_rep_top" 2>/dev/null && pwd -P)" || _zg_rep_top=""
+    fi
+    # Outside any work tree (top empty), nothing is marked.
+    for ((_zg_rep_i = 0; _zg_rep_i < ${#_zg_rdirs[@]}; _zg_rep_i++)); do
+        if [[ -n "$_zg_rep_top" && "$(cd "${_zg_rdirs[_zg_rep_i]}" 2>/dev/null && pwd -P)" == "$_zg_rep_top" ]]; then
+            _zg_current=$_zg_rep_i
             break
         fi
     done
-    return "$rc"
+    return "$_zg_rep_rc"
 }
 
 # --- Pick a report row's marker and name colour ---

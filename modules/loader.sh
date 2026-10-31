@@ -15,13 +15,17 @@ export ZWEIG_COPY_ON_CREATE="${ZWEIG_COPY_ON_CREATE:-.env .env.local .env.develo
 # Uses git-common-dir, which always points at the main repo's .git, so the same
 # root (and thus the same worktree dir) resolves no matter which worktree you're in.
 zg__control_root() {
-  local git_common_dir toplevel abs
+  local git_common_dir abs
   git_common_dir="$(git rev-parse --git-common-dir 2>/dev/null)" || return 1
-  toplevel="$(git rev-parse --show-toplevel 2>/dev/null)" || return 1
+  # Only inside a work tree (not a bare repo's git dir).
+  git rev-parse --show-toplevel >/dev/null 2>&1 || return 1
   if [[ "$git_common_dir" == /* ]]; then
     abs="$git_common_dir"
   else
-    abs="$toplevel/$git_common_dir"
+    # A relative git-common-dir (e.g. "../.git" from a subfolder of the main
+    # checkout) is relative to the current directory, not the top level.
+    # Physical, as show-toplevel was: the same repo always resolves the same.
+    abs="$(pwd -P)/$git_common_dir"
   fi
   (cd "$abs/.." && pwd)
 }

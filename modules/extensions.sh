@@ -16,7 +16,7 @@ zg_extensions_select() {
     zg_helpers_load_worktrees branches dirs || rc=$?
     [[ $rc -ne 1 ]] || return 1
     for ((i = 0; i < ${#dirs[@]}; i++)); do
-        label="$(zg_helpers_worktree_name "${branches[i]}" "${dirs[i]}")"
+        label="$(zg_helpers_worktree_report_name "${branches[i]}" "${dirs[i]}")"
         # Refs can't contain a tab, so "<label>\t<path>" splits unambiguously.
         menu+="$label"$'\t'"${dirs[i]}"$'\n'
     done
