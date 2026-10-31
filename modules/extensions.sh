@@ -11,12 +11,12 @@ zg_extensions_select() {
         return 1
     fi
 
-    local branches dirs i label menu="" rc=0
+    local branches dirs heads i label menu="" rc=0
     # Worktrees whose directory is missing are left out with a warning.
-    zg_helpers_load_worktrees branches dirs || rc=$?
+    zg_helpers_load_worktrees branches dirs heads || rc=$?
     [[ $rc -ne 1 ]] || return 1
     for ((i = 0; i < ${#dirs[@]}; i++)); do
-        label="$(zg_helpers_worktree_report_name "${branches[i]}" "${dirs[i]}")"
+        label="$(zg_helpers_worktree_report_name "${branches[i]}" "${dirs[i]}" "${heads[i]}")"
         # Refs can't contain a tab, so "<label>\t<path>" splits unambiguously.
         menu+="$label"$'\t'"${dirs[i]}"$'\n'
     done
