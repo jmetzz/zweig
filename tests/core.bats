@@ -359,7 +359,7 @@ realdir() { (cd "$1" && pwd -P); }
     git worktree add -q "$REPO/.worktrees/trunk" main
     run bash -c 'echo y | "$1" finalize trunk' _ "$ZG"
     [ "$status" -ne 0 ]
-    [[ "$output" == *"is protected"* ]]
+    [[ "$output" == *"'trunk' holds the default branch 'main'"* ]]
     [ -d "$REPO/.worktrees/trunk" ]
 }
 
