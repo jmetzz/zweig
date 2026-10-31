@@ -383,10 +383,15 @@ zg_core_finalize() {
 
   # Protected worktrees, and the default branch wherever it is checked out,
   # require --force
-  if [[ "$force" == "false" ]] && \
-     { zg_helpers_is_protected "$target" || [[ "$branch" == "$ZWEIG_DEFAULT_BRANCH" ]]; }; then
-    echo "❌ '$target' is protected. Use --force to override." >&2
-    return 1
+  if [[ "$force" == "false" ]]; then
+    if zg_helpers_is_protected "$target"; then
+      echo "❌ '$target' is protected. Use --force to override." >&2
+      return 1
+    fi
+    if [[ "$branch" == "$ZWEIG_DEFAULT_BRANCH" ]]; then
+      echo "❌ '$target' holds the default branch '$branch'. Use --force to override." >&2
+      return 1
+    fi
   fi
 
   # Safe confirmation
