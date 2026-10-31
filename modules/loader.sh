@@ -13,7 +13,8 @@ export ZWEIG_COPY_ON_CREATE="${ZWEIG_COPY_ON_CREATE:-.env .env.local .env.develo
 
 # --- Resolve the control repo root (works from inside a linked worktree too) ---
 # Uses git-common-dir, which always points at the main repo's .git, so the same
-# root (and thus the same worktree dir) resolves no matter which worktree you're in.
+# root (and thus the same worktree dir) resolves no matter which worktree, or
+# which subfolder of one, you're in. Prints a physical path.
 zg__control_root() {
   local git_common_dir abs
   git_common_dir="$(git rev-parse --git-common-dir 2>/dev/null)" || return 1
@@ -24,10 +25,11 @@ zg__control_root() {
   else
     # A relative git-common-dir (e.g. "../.git" from a subfolder of the main
     # checkout) is relative to the current directory, not the top level.
-    # Physical, as show-toplevel was: the same repo always resolves the same.
     abs="$(pwd -P)/$git_common_dir"
   fi
-  (cd "$abs/.." && pwd)
+  # cd collapses "sub/../.git/.." lexically; pwd -P then resolves symlinks, so
+  # symlinked prefixes (macOS /var) can't give one repo two roots.
+  (cd "$abs/.." && pwd -P)
 }
 
 # --- Worktree directory: repo-local by default, override wins, $HOME as last resort ---

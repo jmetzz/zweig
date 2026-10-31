@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Zweig Core Module - core.sh
 # Provides essential commands for worktree lifecycle: create, from, remove, switch, list
-# Requires: bash 4.3+ (namerefs, via zg_helpers_load_worktrees)
+# Requires: bash 4.3+ (namerefs, via the zg_helpers_load_* loaders and
+# zg_helpers_report_mark)
 
 
 # --- Jump to the main worktree (default branch) ---

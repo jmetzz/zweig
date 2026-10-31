@@ -3,7 +3,8 @@
 # Commands: status, prune (metadata|trees), sync, migrate, protect, unprotect
 # Functions named zg_maintenance__<name> (double underscore) are internal
 # helpers, not commands.
-# Requires: bash 4.3+ (namerefs, via zg_helpers_load_worktrees)
+# Requires: bash 4.3+ (namerefs, via the zg_helpers_load_* loaders and
+# zg_helpers_report_mark)
 
 # --- Show sync status ---
 # One aligned row per worktree (main checkout first): name, commits ahead of and
@@ -267,14 +268,18 @@ zg_maintenance_migrate() {
     # Every branch already checked out (main checkout included): git refuses to
     # check a branch out twice, wherever the other worktree is. Read once.
     local -A held=()
-    local listing line
+    # held_head is filled by the split but not needed here.
+    # shellcheck disable=SC2034
+    local listing line held_branch held_head held_path
     if ! listing="$(zg_helpers_list_worktrees --all)"; then
         echo "❌ Error: Could not list worktrees." >&2
         return 1
     fi
     while IFS= read -r line; do
-        # Lines with an empty branch are detached worktrees: nothing held.
-        if [[ -n "${line%%$'\t'*}" ]]; then held["${line%%$'\t'*}"]="${line#*$'\t'}"; fi
+        [[ -n "$line" ]] || continue
+        zg_helpers_split_worktree_line "$line" held_branch held_head held_path
+        # An empty branch is a detached worktree: nothing held.
+        if [[ -n "$held_branch" ]]; then held["$held_branch"]="$held_path"; fi
     done <<<"$listing"
 
     local branch dir_name dir
