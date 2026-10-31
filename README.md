@@ -29,7 +29,7 @@ Managing `git worktree` is powerful but painful.
 You can configure `zweig` behavior using the following environment variables.
 To override the defaults, you must export these variables manually in your shell rc file (e.g., `.bashrc`, `.zshrc`):
 
-- `ZWEIG_WORKTREE_DIR`: Specifies the base directory where worktrees are created. It doesn't limit which worktrees zg manages: commands such as `status`, `sync` and `prune` act on every worktree of the repo.
+- `ZWEIG_WORKTREE_DIR`: Specifies the base directory where worktrees are created. It doesn't limit which worktrees zg manages: `status`, `sync all` and `prune trees` act on every worktree of the repo, wherever it lives on disk.
     Default: `<repo-root>/.worktrees`, resolved per repository (same directory whether you're in the main checkout or an existing worktree). Falls back to `$HOME/.worktrees` when run outside a Git repository.
 - `ZWEIG_DEFAULT_BRANCH`: Sets the default main branch name for operations (e.g., `create`, `sync`).
     Default: `main`
