@@ -36,7 +36,8 @@ else
 fi
 unset _zg_control_root
 export ZWEIG_WORKTREE_DIR
-mkdir -p "$ZWEIG_WORKTREE_DIR"
+# Not created here: resolving the path must have no filesystem side effects.
+# `git worktree add` creates missing parent directories on demand.
 
 # --- Aliases normalization ---
 zg__normalize_cmd() {
