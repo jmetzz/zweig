@@ -108,7 +108,13 @@ shellcheck $(find . -name '*.sh')
 
 ### Testing
 
-There are no automated tests for this project. Manual testing is required for all changes.
+Automated tests live in `tests/*.bats` and run against the real `bin/zg` in a disposable repo with a fake `HOME`.
+
+* `make test` runs the `bats` suite (requires `basher`; installs `bats-core` from `deps`).
+* Without `basher`, use the vendored submodule: `git submodule update --init tests/bats-core && tests/bats-core/bin/bats tests/`.
+* `make smoke` runs `tests/smoke.sh`, a secondary manual check that expects `zg` on `PATH`.
+
+Add a bats test for every behavior change; anything not covered still needs manual testing.
 
 ### Release Process
 

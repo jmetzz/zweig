@@ -37,7 +37,9 @@ fi
 unset _zg_control_root
 export ZWEIG_WORKTREE_DIR
 # Not created here: resolving the path must have no filesystem side effects.
-# `git worktree add` creates missing parent directories on demand.
+# `git worktree add` creates missing parent directories on demand. The directory
+# may therefore not exist yet; every caller must tolerate that (nullglob for
+# loops, a -d check before find/ls).
 
 # --- Aliases normalization ---
 zg__normalize_cmd() {
