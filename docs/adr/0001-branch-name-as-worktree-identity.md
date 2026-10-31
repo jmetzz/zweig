@@ -52,8 +52,9 @@ differ from the branch (e.g. migrated `feature__foo`).
   directory name.
 - Detached-HEAD worktrees have no branch and are only reachable via the fast
   path (by directory name) for now.
-- Identifiers containing `.` or `..` path components are rejected, so a name
-  can never resolve outside `$ZWEIG_WORKTREE_DIR`.
+- Identifiers containing `.` or `..` path components are rejected, so the fast
+  path can't be used to traverse out of `$ZWEIG_WORKTREE_DIR`. (The fallback
+  still resolves worktrees anywhere on disk, by branch.)
 
 ## Alternatives considered
 

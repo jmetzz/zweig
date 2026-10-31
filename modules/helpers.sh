@@ -55,15 +55,15 @@ zg_helpers_worktree_exists() {
 # Prints nothing (and returns 1) if the branch isn't checked out in any
 # worktree. The path is printed even if that directory no longer exists.
 zg_helpers_branch_worktree_path() {
-    local branch="$1" path
+    local branch="$1" wt_path
     # substr($0, 10), not $2: worktree paths may contain spaces, and
     # 10 = length("worktree ") + 1.
-    path="$(git worktree list --porcelain | awk -v b="$branch" '
+    wt_path="$(git worktree list --porcelain | awk -v b="$branch" '
         $1=="worktree" {wt=substr($0, 10)}
         $1=="branch"   {sub("^refs/heads/","",$2); if ($2==b) {print wt; exit}}
     ')"
-    [[ -n "$path" ]] || return 1
-    printf '%s\n' "$path"
+    [[ -n "$wt_path" ]] || return 1
+    printf '%s\n' "$wt_path"
 }
 
 # --- Resolve a worktree identifier to its path (prints the path) ---

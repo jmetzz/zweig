@@ -202,9 +202,10 @@ realdir() { (cd "$1" && pwd -P); }
         source "'"$BATS_TEST_DIRNAME"'/../shims/shims.sh"
         zg cd ext-branch || exit 10
         pwd -P
-        zg cd does-not-exist 2>/dev/null && exit 11
+        zg cd does-not-exist 2>/dev/null
+        [ $? -eq 1 ] || exit 11
         exit 0
     '
     [ "$status" -eq 0 ]
-    [[ "${lines[-1]}" == "$(realdir "$TEST_ROOT/elsewhere/ext")" ]]
+    [[ "${lines[${#lines[@]}-1]}" == "$(realdir "$TEST_ROOT/elsewhere/ext")" ]]
 }
