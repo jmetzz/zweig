@@ -291,3 +291,101 @@ realdir() { (cd "$1" && pwd -P); }
     [[ "$output" == *"detached HEAD"* ]]
     [ -d "$REPO/.worktrees/detached" ]
 }
+
+@test "zg remove and finalize refuse to run from inside the target worktree" {
+    make_repo
+    git worktree add -q "$TEST_ROOT/elsewhere/ext" -b ext-branch
+    cd "$TEST_ROOT/elsewhere/ext"
+    run "$ZG" remove ext-branch --force
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"You are inside"* ]]
+    run "$ZG" finalize ext-branch --force
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"You are inside"* ]]
+    [ -d "$TEST_ROOT/elsewhere/ext" ]
+}
+
+@test "zg remove works from a sibling worktree whose name shares the prefix" {
+    make_repo
+    git worktree add -q "$TEST_ROOT/elsewhere/foo" -b foo
+    git worktree add -q "$TEST_ROOT/elsewhere/foobar" -b foobar
+    cd "$TEST_ROOT/elsewhere/foobar"
+    run "$ZG" remove foo --force
+    [ "$status" -eq 0 ]
+    [ ! -e "$TEST_ROOT/elsewhere/foo" ]
+}
+
+@test "zg rebuild leaves the worktree untouched when the prompt is declined" {
+    make_repo
+    git worktree add -q "$TEST_ROOT/elsewhere/ext" -b ext-branch
+    touch "$TEST_ROOT/elsewhere/ext/stale-file"
+    run bash -c 'echo n | "$1" rebuild ext-branch' _ "$ZG"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"Rebuilt"* ]]
+    [ -e "$TEST_ROOT/elsewhere/ext/stale-file" ]
+}
+
+@test "zg rebuild refuses a protected outside worktree without --force" {
+    make_repo
+    git worktree add -q "$TEST_ROOT/elsewhere/ext" -b ext-branch
+    "$ZG" protect ext-branch >/dev/null
+    run bash -c 'echo y | "$1" rebuild ext-branch' _ "$ZG"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"is protected"* ]]
+    [ -e "$TEST_ROOT/elsewhere/ext/.protected" ]
+}
+
+@test "zg finalize deletes a merged branch that has no worktree" {
+    make_repo
+    git branch lonely
+    run "$ZG" finalize lonely --force
+    [ "$status" -eq 0 ]
+    ! git show-ref --verify --quiet refs/heads/lonely
+}
+
+@test "zg finalize of a detached worktree keeps a branch sharing its name" {
+    make_repo
+    git branch foo
+    git worktree add -q --detach "$REPO/.worktrees/foo"
+    run "$ZG" finalize foo --force
+    [ "$status" -eq 0 ]
+    [ ! -e "$REPO/.worktrees/foo" ]
+    git show-ref --verify --quiet refs/heads/foo
+}
+
+@test "zg finalize refuses a directory holding the default branch without --force" {
+    make_repo
+    git checkout -q -b dev
+    git worktree add -q "$REPO/.worktrees/trunk" main
+    run bash -c 'echo y | "$1" finalize trunk' _ "$ZG"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"is protected"* ]]
+    [ -d "$REPO/.worktrees/trunk" ]
+}
+
+@test "zg protect and unprotect report an unknown worktree on stderr" {
+    make_repo
+    run --separate-stderr "$ZG" protect does-not-exist
+    [ "$status" -ne 0 ]
+    [ -z "$output" ]
+    [[ "$stderr" == *"Worktree or branch 'does-not-exist' not found."* ]]
+    run --separate-stderr "$ZG" unprotect does-not-exist
+    [ "$status" -ne 0 ]
+    [ -z "$output" ]
+    [[ "$stderr" == *"Worktree or branch 'does-not-exist' not found."* ]]
+}
+
+@test "zg protect by branch guards a worktree whose directory name differs" {
+    make_repo
+    git worktree add -q "$REPO/.worktrees/feature__foo" -b feature/foo
+    run "$ZG" protect feature/foo
+    [ "$status" -eq 0 ]
+    run bash -c 'echo y | "$1" remove feature__foo' _ "$ZG"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"is protected"* ]]
+    run "$ZG" unprotect feature/foo
+    [ "$status" -eq 0 ]
+    run bash -c 'echo y | "$1" remove feature/foo' _ "$ZG"
+    [ "$status" -eq 0 ]
+    [ ! -e "$REPO/.worktrees/feature__foo" ]
+}

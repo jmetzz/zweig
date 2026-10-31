@@ -325,7 +325,7 @@ zg_core_rebuild() {
         zg_helpers_report_worktree_not_found "$wtree"
         return 1
     fi
-    branch="$(git -C "$dir" branch --show-current)"
+    branch="$(zg_helpers_worktree_branch "$dir")" || return 1
     if [[ -z "$branch" ]]; then
         echo "❌ Worktree '$wtree' has a detached HEAD; nothing to rebuild from." >&2
         return 1
@@ -337,13 +337,16 @@ zg_core_rebuild() {
     else
         zg_core_remove "$wtree" || return $?
     fi
-    # The prompt was declined: remove kept the worktree and returned 0.
+    # remove also returns 0 when its prompt is declined, so a worktree that is
+    # still there is the only sign that nothing was removed.
     [[ -d "$dir" ]] && return 0
 
     local root_dir
     root_dir="$(zg__control_root)" || root_dir="$(git rev-parse --show-toplevel)"
     git worktree add "$dir" "$branch" || {
         echo "❌ Error: Failed to re-add worktree for '$branch' at $dir." >&2
+        echo "   The old worktree was already removed; the branch is kept. Recover with:" >&2
+        echo "   git worktree add \"$dir\" \"$branch\"" >&2
         return 1
     }
     zg_helpers_seed_worktree "$dir" "$root_dir"
@@ -354,42 +357,45 @@ zg_core_rebuild() {
 
 # --- Finalize branch after merge ---
 zg_core_finalize() {
-  local branch="$1"
+  local target="$1"
   local force="false"
 
-  if [[ -z "$branch" ]]; then
+  if [[ -z "$target" ]]; then
     echo "❌ Error: Missing branch name"
     return 1
   fi
   [[ ${2:-} == "--force" ]] && force="true"
 
-  # Protected branches require --force
-  if zg_helpers_is_protected "$branch" && [[ "$force" == "false" ]]; then
-    echo "❌ '$branch' is protected. Use --force to override." >&2
+  # Find the worktree first: the guards below need its real branch. It may be
+  # gone already; finalize then only deletes the branch named <target>.
+  local dir="" branch="$target"
+  if dir="$(zg_helpers_resolve_worktree "$target")"; then
+    # Avoid operating inside the target worktree
+    if zg_helpers_inside_dir "$dir"; then
+      echo "❌ You are inside the '$target' worktree. Switch away before finalizing." >&2
+      return 1
+    fi
+    # A directory-name match may hold a differently named branch (e.g. migrated
+    # feature__foo): act on the branch actually checked out there. A detached
+    # worktree has none, so no branch is deleted.
+    branch="$(zg_helpers_worktree_branch "$dir")" || return 1
+  fi
+
+  # Protected worktrees, and the default branch wherever it is checked out,
+  # require --force
+  if [[ "$force" == "false" ]] && \
+     { zg_helpers_is_protected "$target" || [[ "$branch" == "$ZWEIG_DEFAULT_BRANCH" ]]; }; then
+    echo "❌ '$target' is protected. Use --force to override." >&2
     return 1
   fi
 
   # Safe confirmation
   if [[ "$force" == "false" ]]; then
-    if ! read -p "Finalize '$branch' (remove worktree & delete local branch)? (y/N): " -n 1 -r; then
+    if ! read -p "Finalize '$target' (remove worktree & delete local branch)? (y/N): " -n 1 -r; then
       echo; echo "Operation cancelled."; return 1
     fi
     echo
     [[ "$REPLY" =~ ^[Yy]$ ]] || { echo "Operation cancelled."; return 0; }
-  fi
-
-  # The worktree may be gone already; finalize then only deletes the branch.
-  local dir="" wt_branch
-  if dir="$(zg_helpers_resolve_worktree "$branch")"; then
-    # Avoid operating inside the target worktree
-    if zg_helpers_inside_dir "$dir"; then
-      echo "❌ You are inside the '$branch' worktree. Switch away before finalizing." >&2
-      return 1
-    fi
-    # A directory-name match may hold a differently named branch (e.g. migrated
-    # feature__foo); delete the branch actually checked out there.
-    wt_branch="$(git -C "$dir" branch --show-current)"
-    branch="${wt_branch:-$branch}"
   fi
 
   # Fresh remote info (optional but helpful)
@@ -398,19 +404,19 @@ zg_core_finalize() {
   # Remove worktree (respect --force)
   if [[ -n "$dir" ]]; then
     if [[ "$force" == "true" ]]; then
-      git worktree remove --force "$dir" || { echo "❌ Failed to force-remove worktree: $branch" >&2; return 1; }
+      git worktree remove --force "$dir" || { echo "❌ Failed to force-remove worktree: $target" >&2; return 1; }
     else
-      git worktree remove "$dir" || { echo "❌ Failed to remove worktree: $branch" >&2; return 1; }
+      git worktree remove "$dir" || { echo "❌ Failed to remove worktree: $target" >&2; return 1; }
     fi
   fi
 
   # Delete local branch if present (will fail if not merged—fine)
-  if git show-ref --verify --quiet "refs/heads/$branch"; then
+  if [[ -n "$branch" ]] && git show-ref --verify --quiet "refs/heads/$branch"; then
     git branch -d "$branch" || {
       echo "⚠️ Branch $branch not deleted (not fully merged?)."
       [[ "$force" == "true" ]] && echo "Hint: use 'git branch -D $branch' to force."
     }
   fi
 
-  echo "✅ Finalized and cleaned up: $branch"
+  echo "✅ Finalized and cleaned up: $target"
 }

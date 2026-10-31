@@ -25,8 +25,9 @@ a large class of real worktrees.
 
 A worktree is identified by its **branch name**. Every command that takes a
 worktree argument will resolve it through one shared resolver
-(`zg_helpers_resolve_worktree`). `switch` and `path` use it as of #3; the
-remaining commands move onto it in #4, #5 and #15.
+(`zg_helpers_resolve_worktree`). `switch` and `path` use it as of #3;
+`remove`, `protect`, `unprotect`, `finalize` and `rebuild` as of #4; the
+remaining commands move onto it in #5 and #15.
 
 1. **Fast path:** if `$ZWEIG_WORKTREE_DIR/<identifier>` is a directory, use it.
    This costs no subprocess and covers the common case of a worktree zg created.
@@ -40,8 +41,9 @@ differ from the branch (e.g. migrated `feature__foo`).
 
 ## Consequences
 
-- `switch` and `path` find worktrees anywhere on disk. #4, #5 and #15 move the
-  remaining commands onto the same resolver.
+- `switch`, `path`, `remove`, `protect`, `unprotect`, `finalize` and `rebuild`
+  find worktrees anywhere on disk. #5 and #15 move the remaining commands onto
+  the same resolver.
 - Git is the source of truth for which worktrees exist; zg keeps no registry.
 - If a directory under `$ZWEIG_WORKTREE_DIR` shares its name with a
   *different* branch, the fast path wins and that branch is unreachable by
