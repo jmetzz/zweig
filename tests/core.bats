@@ -406,7 +406,7 @@ make_repo_with_origin() {
     [ "$status" -eq 0 ]
     [[ "$output" == *" ext "*"↑0 ↓0"* ]]
     [[ "$output" == *" foo "*"↑0 ↓0"* ]]
-    [[ "${lines[1]}" == [\ *]" main "* ]]
+    [[ "${lines[1]}" == "* main "* ]]
 }
 
 # Regression guard: prune metadata is plain `git worktree prune`, already
@@ -500,7 +500,7 @@ make_repo_with_origin() {
     [ "$status" -eq 0 ]
     [[ "$output" == *" ext "*"↑0 ↓0"* ]]
     [[ "$output" == *" foo "*"↑0 ↓0"* ]]
-    [[ "${lines[1]}" == [\ *]" main "* ]]
+    [[ "${lines[1]}" == "  main "* ]]
 }
 
 @test "zg status, prune trees and sync all succeed with no linked worktrees" {
@@ -928,8 +928,9 @@ STUB
     [ "$(git -C "$REPO/.worktrees/main-fix" branch --show-current)" = "main-fix" ]
 }
 
-# Byte offset of the first occurrence of $2 in $1 (both columns and markers are
-# ASCII or the same multibyte glyph on every row, so bytes compare fine).
+# Byte offset of the first occurrence of $2 in $1. Comparing offsets across rows
+# is only sound while the text before $2 is ASCII on every row (as the test
+# names and paths here are); a non-ASCII name would shift its row's bytes.
 col_of() { local prefix="${1%%"$2"*}"; echo "${#prefix}"; }
 
 @test "zg list shows names only, main first then sorted, and marks the current worktree" {
@@ -1029,7 +1030,99 @@ col_of() { local prefix="${1%%"$2"*}"; echo "${#prefix}"; }
 @test "zg status shows ? when there is no origin to compare against" {
     make_repo
     git worktree add -q -b ext "$TEST_ROOT/outside"
-    run "$ZG" status
+    run --separate-stderr "$ZG" status
     [ "$status" -eq 0 ]
     [[ "${lines[-1]}" == "  ext "*"↑? ↓?" ]]
+}
+
+@test "zg list and status mark only the nested worktree when run inside .worktrees or a subfolder" {
+    make_repo_with_origin
+    "$ZG" create foo >/dev/null 2>&1
+    mkdir -p "$REPO/.worktrees/foo/sub/dir" "$REPO/docs"
+    local where
+    for where in "$REPO/.worktrees/foo" "$REPO/.worktrees/foo/sub/dir"; do
+        cd "$where"
+        run "$ZG" list
+        [ "$output" = "$(printf '%s\n' "  main" "* foo")" ]
+        run "$ZG" status
+        [[ "${lines[1]}" == "  main "* ]]
+        [[ "${lines[2]}" == "* foo "* ]]
+    done
+    cd "$REPO/docs"
+    run "$ZG" list
+    [ "$output" = "$(printf '%s\n' "* main" "  foo")" ]
+}
+
+@test "zg list sorts every row when the main entry is a bare repository" {
+    git init -q --bare "$TEST_ROOT/bare.git"
+    # git lists linked worktrees in directory order, so a-dir (zeta) comes
+    # before b-dir (alpha): only a real sort puts alpha first.
+    git -C "$TEST_ROOT/bare.git" worktree add -q --orphan -b zeta "$TEST_ROOT/a-dir" 2>/dev/null \
+        || skip "git too old for worktree add --orphan"
+    git -C "$TEST_ROOT/a-dir" commit -q --allow-empty -m "chore: init"
+    git -C "$TEST_ROOT/bare.git" worktree add -q -b alpha "$TEST_ROOT/b-dir" zeta
+    cd "$TEST_ROOT/a-dir"
+    run "$ZG" list
+    [ "$status" -eq 0 ]
+    [ "$output" = "$(printf '%s\n' "  alpha" "* zeta")" ]
+}
+
+@test "zg list and list -d warn about a missing directory and keep the other rows" {
+    make_repo
+    git worktree add -q -b gone "$TEST_ROOT/elsewhere/gone"
+    git worktree add -q -b ext "$TEST_ROOT/elsewhere/ext"
+    rm -rf "$TEST_ROOT/elsewhere/gone"
+    run --separate-stderr "$ZG" list
+    [ "$status" -eq 0 ]
+    [[ "$stderr" == *"Skipping gone: directory missing"* ]]
+    [ "$output" = "$(printf '%s\n' "* main" "  ext")" ]
+    run --separate-stderr "$ZG" list -d
+    [ "$status" -eq 0 ]
+    [ "${#lines[@]}" -eq 3 ]
+    [ "$(col_of "${lines[0]}" PATH)" -eq "$(col_of "${lines[2]}" /)" ]
+}
+
+@test "zg list -d keeps columns aligned for spaced paths and two detached worktrees at one commit" {
+    make_repo
+    git worktree add -q --detach "$TEST_ROOT/else where/b"
+    git worktree add -q --detach "$TEST_ROOT/else where/a"
+    local sha7 row path_col head_col
+    sha7="$(git rev-parse --short=7 HEAD)"
+    run "$ZG" list -d
+    [ "$status" -eq 0 ]
+    [ "${#lines[@]}" -eq 4 ]
+    path_col="$(col_of "${lines[0]}" PATH)" head_col="$(col_of "${lines[0]}" HEAD)"
+    for row in "${lines[@]:1}"; do
+        [ "${row:$path_col:1}" = "/" ]
+        [ "${row:$head_col}" = "$sha7" ]
+    done
+    # Equal names fall back to path order.
+    [[ "${lines[2]}" == *"/else where/a "* ]]
+    [[ "${lines[3]}" == *"/else where/b "* ]]
+}
+
+@test "zg status widens the ahead column and says why it shows ?" {
+    make_repo_with_origin
+    git worktree add -q -b busy "$TEST_ROOT/busy"
+    local n
+    for n in 1 2 3 4 5 6 7 8 9 10; do git -C "$TEST_ROOT/busy" commit -q --allow-empty -m "feat: $n"; done
+    run "$ZG" status
+    [ "$status" -eq 0 ]
+    [[ "${lines[2]}" == "  busy "*"↑10 ↓0" ]]
+    [ "$(col_of "${lines[1]}" "↓")" -eq "$(col_of "${lines[2]}" "↓")" ]
+    git remote remove origin
+    run --separate-stderr "$ZG" status
+    [ "$status" -eq 0 ]
+    [[ "$stderr" == *"Could not count ahead/behind for: main, busy"* ]]
+}
+
+@test "zg create from a subfolder of the main checkout uses the repo's worktree dir" {
+    make_repo
+    mkdir -p "$REPO/docs/deep"
+    cd "$REPO/docs/deep"
+    run --separate-stderr "$ZG" create bar
+    [ "$status" -eq 0 ]
+    [[ "$stderr" != *"No such file or directory"* ]]
+    [ -d "$REPO/.worktrees/bar" ]
+    [ ! -e "$HOME/.worktrees" ]
 }

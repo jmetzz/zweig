@@ -31,8 +31,9 @@ zg_core_list() {
         return 1
     fi
 
-    local names dirs current rc=0
-    zg_helpers_load_report_worktrees names dirs current || rc=$?
+    # Filled as arrays (and an index) by the loader, through namerefs.
+    local names dirs heads current rc=0
+    zg_helpers_load_report_worktrees names dirs heads current || rc=$?
     [[ $rc -ne 1 ]] || return 1
     zg_helpers_colors
 
@@ -45,12 +46,11 @@ zg_core_list() {
         return 0
     fi
 
-    # Columns start as wide as their headers ("NAME", "PATH").
-    local heads=() name_w=4 path_w=4
+    # Columns start as wide as their headers ("NAME", "PATH") and grow to fit.
+    local name_w=4 path_w=4
     for ((i = 0; i < ${#dirs[@]}; i++)); do
-        ((${#names[i]} <= name_w)) || name_w=${#names[i]}
-        ((${#dirs[i]} <= path_w)) || path_w=${#dirs[i]}
-        heads+=("$(git -C "${dirs[i]}" rev-parse --short=7 HEAD 2>/dev/null || echo unknown)")
+        if ((${#names[i]} > name_w)); then name_w=${#names[i]}; fi
+        if ((${#dirs[i]} > path_w)); then path_w=${#dirs[i]}; fi
     done
     printf '  %-*s  %-*s  %s\n' "$name_w" NAME "$path_w" PATH HEAD
     for ((i = 0; i < ${#dirs[@]}; i++)); do

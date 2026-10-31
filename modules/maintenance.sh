@@ -11,27 +11,37 @@
 zg_maintenance_status() {
     zg_helpers_fetch_origin || return 1
     echo "📊 Worktree sync status (vs origin/$ZWEIG_DEFAULT_BRANCH):"
-    local names dirs current i rc=0
+    # Filled as arrays (and an index) by the loader, through namerefs. Status
+    # has no HEAD column, but the loader fills heads regardless.
+    # shellcheck disable=SC2034
+    local names dirs heads current i rc=0
     # A missing directory (rc 2) is only warned about: status is a read-only report.
-    zg_helpers_load_report_worktrees names dirs current || rc=$?
+    zg_helpers_load_report_worktrees names dirs heads current || rc=$?
     [[ $rc -ne 1 ]] || return 1
     zg_helpers_colors
 
     # "?" rather than 0 when git can't count (e.g. no origin/<default>): a
-    # made-up 0 would read as "in sync".
-    local mark colour aheads=() behinds=() name_w=0 ahead_w=0
+    # made-up 0 would read as "in sync". Those rows are named on stderr.
+    local mark colour aheads=() behinds=() uncounted=() name_w=0 ahead_w=0
     # ${#dirs[@]}, not "${!dirs[@]}": the latter trips set -u on an empty array before bash 4.4.
     for ((i = 0; i < ${#dirs[@]}; i++)); do
         aheads+=("$(git -C "${dirs[i]}" rev-list --count "origin/$ZWEIG_DEFAULT_BRANCH..HEAD" 2>/dev/null || echo "?")")
         behinds+=("$(git -C "${dirs[i]}" rev-list --count "HEAD..origin/$ZWEIG_DEFAULT_BRANCH" 2>/dev/null || echo "?")")
-        ((${#names[i]} <= name_w)) || name_w=${#names[i]}
-        ((${#aheads[i]} <= ahead_w)) || ahead_w=${#aheads[i]}
+        if [[ "${aheads[i]}" == "?" || "${behinds[i]}" == "?" ]]; then uncounted+=("${names[i]}"); fi
+        # Columns grow to fit the widest name and ahead count.
+        if ((${#names[i]} > name_w)); then name_w=${#names[i]}; fi
+        if ((${#aheads[i]} > ahead_w)); then ahead_w=${#aheads[i]}; fi
     done
     for ((i = 0; i < ${#dirs[@]}; i++)); do
         zg_helpers_report_mark mark colour "$((i == current))"
         printf '%s%s%-*s%s  ↑%-*s ↓%s\n' "$mark" "$colour" "$name_w" "${names[i]}" "$ZG_C_RESET" \
             "$ahead_w" "${aheads[i]}" "${behinds[i]}"
     done
+    if ((${#uncounted[@]} > 0)); then
+        local joined
+        joined="$(printf '%s, ' "${uncounted[@]}")"
+        echo "⚠️ Could not count ahead/behind for: ${joined%, } (does origin/$ZWEIG_DEFAULT_BRANCH exist?)" >&2
+    fi
 }
 
 # --- Remove broken worktree metadata ---
@@ -154,7 +164,7 @@ zg_maintenance_sync_all() {
     [[ $rc -ne 2 ]] || failed=1
     for ((i = 0; i < ${#dirs[@]}; i++)); do
         branch="${branches[i]}" dir="${dirs[i]}"
-        label="$(zg_helpers_worktree_label "$branch" "$dir")"
+        label="$(zg_helpers_worktree_short_label "$branch" "$dir")"
 
         if zg_helpers_dir_is_protected "$branch" "$dir"; then
             echo "🛡️ Skipping protected: $label"
@@ -186,7 +196,7 @@ zg_maintenance_sync_current() {
     local wdir branch label
     wdir="$(git rev-parse --show-toplevel)" || return 1
     branch="$(zg_helpers_worktree_branch "$wdir")" || return 1
-    label="$(zg_helpers_worktree_label "$branch" "$wdir")"
+    label="$(zg_helpers_worktree_short_label "$branch" "$wdir")"
     # Same rules as sync all: never move a detached HEAD, and leave protected
     # worktrees (including the default branch's) alone.
     if [[ -z "$branch" ]]; then
