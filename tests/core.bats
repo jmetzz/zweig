@@ -87,3 +87,45 @@ make_repo() {
     [ -d "$ZWEIG_WORKTREE_DIR/foo" ]
     [ ! -e "$REPO/.worktrees" ]
 }
+
+# Physical path, so macOS /var -> /private/var symlinks don't cause mismatches.
+realdir() { (cd "$1" && pwd -P); }
+
+@test "zg path finds a worktree created outside the zg worktree dir by branch" {
+    make_repo
+    git worktree add -q "$TEST_ROOT/elsewhere/ext" -b ext-branch
+    run "$ZG" path ext-branch
+    [ "$status" -eq 0 ]
+    [ "$(realdir "$output")" = "$(realdir "$TEST_ROOT/elsewhere/ext")" ]
+}
+
+@test "zg path finds a zg-created worktree by its directory name" {
+    make_repo
+    "$ZG" create foo >/dev/null
+    run "$ZG" path foo
+    [ "$status" -eq 0 ]
+    [ "$(realdir "$output")" = "$(realdir "$REPO/.worktrees/foo")" ]
+}
+
+@test "zg path finds a slash-named branch whose directory name differs" {
+    make_repo
+    git worktree add -q "$TEST_ROOT/elsewhere/feature__foo" -b feature/foo
+    run "$ZG" path feature/foo
+    [ "$status" -eq 0 ]
+    [ "$(realdir "$output")" = "$(realdir "$TEST_ROOT/elsewhere/feature__foo")" ]
+}
+
+@test "zg switch succeeds for a worktree created outside the zg worktree dir" {
+    make_repo
+    git worktree add -q "$TEST_ROOT/elsewhere/ext" -b ext-branch
+    run "$ZG" switch ext-branch
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"elsewhere/ext"* ]]
+}
+
+@test "zg path fails for an unknown worktree or branch" {
+    make_repo
+    run "$ZG" path does-not-exist
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"not found"* ]]
+}
