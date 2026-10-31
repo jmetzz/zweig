@@ -26,6 +26,14 @@ if [[ ! -f "$ZWEIG_ROOT/modules/loader.sh" ]]; then
   exit 1
 fi
 
+# Namerefs (local -n) need bash 4.3+. macOS ships bash 3.2 as /bin/bash, so say
+# so plainly instead of failing later with "local: -n: invalid option".
+if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 3) )); then
+  echo "❌ Zweig needs bash 4.3 or newer; this is bash $BASH_VERSION ($BASH)." >&2
+  echo "   Install a newer bash (e.g. brew install bash) and make sure it comes first on PATH." >&2
+  exit 1
+fi
+
 # Shell strictness is set inside the sourced modules
 # (each module does set -euo pipefail)
 # shellcheck disable=SC1091

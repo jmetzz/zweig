@@ -175,9 +175,14 @@ zg_maintenance_sync_current() {
     wdir="$(git rev-parse --show-toplevel)" || return 1
     branch="$(zg_helpers_worktree_branch "$wdir")" || return 1
     label="$(zg_helpers_worktree_label "$branch" "$wdir")"
-    # Same rule as sync all: never move a detached HEAD.
+    # Same rules as sync all: never move a detached HEAD, and leave protected
+    # worktrees (including the default branch's) alone.
     if [[ -z "$branch" ]]; then
         echo "❌ Current worktree ($label) has a detached HEAD; nothing to sync." >&2
+        return 1
+    fi
+    if zg_helpers_dir_is_protected "$branch" "$wdir"; then
+        echo "🛡️ Current worktree ($label) is protected; not syncing." >&2
         return 1
     fi
 
@@ -237,15 +242,26 @@ zg_maintenance__sync_dir() {
 zg_maintenance_migrate() {
     echo "🚚 Migrating branches to worktrees..."
 
-    local branch dir_name dir checked_out
+    # Every branch already checked out (main checkout included): git refuses to
+    # check a branch out twice, wherever the other worktree is. Read once.
+    local -A held=()
+    local listing line
+    if ! listing="$(zg_helpers_checked_out_branches)"; then
+        echo "❌ Error: Could not list worktrees." >&2
+        return 1
+    fi
+    while IFS= read -r line; do
+        if [[ -n "$line" ]]; then held["${line%%$'\t'*}"]="${line#*$'\t'}"; fi
+    done <<<"$listing"
+
+    local branch dir_name dir
     for branch in $(git for-each-ref --format='%(refname:short)' refs/heads/ | grep -vE "^($ZWEIG_DEFAULT_BRANCH|HEAD)"); do
         dir_name="${branch//\//__}"
         dir="$ZWEIG_WORKTREE_DIR/$dir_name"
-        # git refuses to check a branch out twice, wherever the other worktree is.
-        if checked_out="$(zg_helpers_branch_worktree_path "$branch")"; then
-            echo "⏭️ Already checked out: $branch ($checked_out)"
+        if [[ -n "${held[$branch]+set}" ]]; then
+            echo "⏭️ Already checked out: $branch (${held[$branch]})"
         elif [[ -d "$dir" ]]; then
-            echo "⏭️ Already exists: $branch"
+            echo "⏭️ Directory already exists, not migrating $branch: $dir"
         else
             echo "➡️ Adding $branch to worktree..."
             git worktree add "$dir" "$branch"

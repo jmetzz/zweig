@@ -36,8 +36,8 @@ zg_core_create() {
   [[ -n "$wtree" ]] || { echo "❌ Missing branch/worktree name."; return 1; }
   git check-ref-format --branch "$wtree" >/dev/null 2>&1 || { echo "❌ Invalid branch name: $wtree"; return 1; }
 
-  zg_helpers_is_protected "$wtree" && { echo "❌ Name is protected: $wtree"; return 1; }
-  zg_helpers_worktree_exists "$wtree" && { echo "❌ Worktree '$wtree' already exists."; return 1; }
+  zg_helpers_is_protected "$wtree" && { echo "❌ Name is protected: $wtree" >&2; return 1; }
+  zg_helpers_worktree_exists "$wtree" && { echo "❌ Worktree '$wtree' already exists." >&2; return 1; }
   zg_helpers_ensure_branch_free "$wtree" || return 1
 
   # Try to refresh remotes (no-op if no origin)
@@ -96,12 +96,12 @@ zg_core_create_from() {
     fi
 
     if zg_helpers_is_protected "$branch"; then
-        echo "❌ Error: Branch '$branch' is protected."
+        echo "❌ Error: Branch '$branch' is protected." >&2
         return 1
     fi
 
     if zg_helpers_worktree_exists "$branch"; then
-        echo "❌ Error: Worktree directory for '$branch' already exists."
+        echo "❌ Error: Worktree directory for '$branch' already exists." >&2
         return 1
     fi
     zg_helpers_ensure_branch_free "$branch" || return 1
@@ -283,9 +283,9 @@ zg_core_remove_merged() {
     local removed=0 skipped=0 failed=0
 
     echo "🧹 Checking for worktrees merged into $base ..."
-    local branches dirs i branch dir target rc=0
-    # A worktree with a missing directory is only warned about: there is nothing
-    # on disk to remove, and `zg prune metadata` cleans it up.
+    local branches dirs i branch dir target target_real dir_real rc=0
+    # A worktree with a missing directory is only warned about (rc 2): there is
+    # nothing on disk to remove, and `zg prune metadata` cleans it up.
     zg_helpers_load_worktrees branches dirs || rc=$?
     [[ $rc -ne 1 ]] || return 1
     for ((i = 0; i < ${#dirs[@]}; i++)); do
@@ -303,11 +303,21 @@ zg_core_remove_merged() {
 
         # Consider only branches that are fully merged into the default branch
         if git merge-base --is-ancestor "refs/heads/$branch" "$base"; then
+            # finalize --force skips the dirty and in-progress guards, and this
+            # sweep reaches worktrees other tools made (a fresh branch with no
+            # commits counts as merged), so never hand it one holding work.
+            if zg_helpers_worktree_busy "$dir"; then
+                echo "⏭️  Skipping $branch: uncommitted work or a merge/rebase in progress ($dir). Finalize it by hand: zg finalize $branch"
+                skipped=$((skipped + 1)); continue
+            fi
             # finalize resolves by name, and a directory named after the branch
             # wins (ADR 0001). If that is a different worktree, finalizing would
             # force-remove the wrong one, so leave this branch for the user.
+            # Physical paths, so symlinked prefixes (macOS /var) still match.
             target="$(zg_helpers_resolve_worktree "$branch")" || target=""
-            if [[ "$(cd "$target" 2>/dev/null && pwd -P)" != "$(cd "$dir" && pwd -P)" ]]; then
+            target_real="" dir_real="$(cd "$dir" && pwd -P)"
+            [[ -z "$target" ]] || target_real="$(cd "$target" && pwd -P)"
+            if [[ "$target_real" != "$dir_real" ]]; then
                 echo "❌ Not finalizing $branch: its name resolves to ${target:-nothing}, not $dir." >&2
                 failed=$((failed + 1)); continue
             fi
@@ -324,6 +334,7 @@ zg_core_remove_merged() {
     done
 
     echo "✅ remove-merged complete — removed: $removed, skipped: $skipped, failed: $failed"
+    [[ $rc -ne 2 ]] || echo "⚠️ Worktrees with a missing directory were not checked (see warnings above)." >&2
     [[ $failed -eq 0 ]] || return 1
 }
 
