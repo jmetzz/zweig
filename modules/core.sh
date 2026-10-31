@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Zweig Core Module - core.sh
 # Provides essential commands for worktree lifecycle: create, from, remove, switch, list
-# Requires: bash 4+
+# Requires: bash 4.3+ (namerefs, via zg_helpers_load_worktrees)
 
 
 # --- Jump to the main worktree (default branch) ---
@@ -38,6 +38,7 @@ zg_core_create() {
 
   zg_helpers_is_protected "$wtree" && { echo "❌ Name is protected: $wtree"; return 1; }
   zg_helpers_worktree_exists "$wtree" && { echo "❌ Worktree '$wtree' already exists."; return 1; }
+  zg_helpers_ensure_branch_free "$wtree" || return 1
 
   # Try to refresh remotes (no-op if no origin)
   zg_helpers_fetch_origin || return 1
@@ -103,6 +104,7 @@ zg_core_create_from() {
         echo "❌ Error: Worktree directory for '$branch' already exists."
         return 1
     fi
+    zg_helpers_ensure_branch_free "$branch" || return 1
 
     # Refresh remote refs consistently
     zg_helpers_fetch_origin || return 1
@@ -281,28 +283,45 @@ zg_core_remove_merged() {
     local removed=0 skipped=0 failed=0
 
     echo "🧹 Checking for worktrees merged into $base ..."
-    shopt -s nullglob
-    for dir in "$ZWEIG_WORKTREE_DIR"/*; do
-        local wtree; wtree="$(basename "$dir")"
+    local branches dirs i branch dir target rc=0
+    # A worktree with a missing directory is only warned about: there is nothing
+    # on disk to remove, and `zg prune metadata` cleans it up.
+    zg_helpers_load_worktrees branches dirs || rc=$?
+    [[ $rc -ne 1 ]] || return 1
+    for ((i = 0; i < ${#dirs[@]}; i++)); do
+        branch="${branches[i]}" dir="${dirs[i]}"
 
-        if zg_helpers_is_protected "$wtree"; then
-            echo "🛡️  Skipping protected: $wtree"; skipped=$((skipped + 1)); continue
+        # A detached worktree has no branch to test for being merged.
+        if [[ -z "$branch" ]]; then
+            echo "⏭️  Skipping detached worktree: $(basename "$dir") ($dir)"
+            skipped=$((skipped + 1)); continue
+        fi
+
+        if zg_helpers_dir_is_protected "$branch" "$dir"; then
+            echo "🛡️  Skipping protected: $branch"; skipped=$((skipped + 1)); continue
         fi
 
         # Consider only branches that are fully merged into the default branch
-        if git merge-base --is-ancestor "refs/heads/$wtree" "$base"; then
-            echo "🔥 $wtree is merged into $base. Finalizing..."
-            if zg_core_finalize "$wtree" --force; then
+        if git merge-base --is-ancestor "refs/heads/$branch" "$base"; then
+            # finalize resolves by name, and a directory named after the branch
+            # wins (ADR 0001). If that is a different worktree, finalizing would
+            # force-remove the wrong one, so leave this branch for the user.
+            target="$(zg_helpers_resolve_worktree "$branch")" || target=""
+            if [[ "$(cd "$target" 2>/dev/null && pwd -P)" != "$(cd "$dir" && pwd -P)" ]]; then
+                echo "❌ Not finalizing $branch: its name resolves to ${target:-nothing}, not $dir." >&2
+                failed=$((failed + 1)); continue
+            fi
+            echo "🔥 $branch is merged into $base. Finalizing..."
+            if zg_core_finalize "$branch" --force; then
                 removed=$((removed + 1))
             else
-                echo "❌ Failed to finalize $wtree" >&2
+                echo "❌ Failed to finalize $branch" >&2
                 failed=$((failed + 1))
             fi
         else
             skipped=$((skipped + 1))
         fi
     done
-    shopt -u nullglob
 
     echo "✅ remove-merged complete — removed: $removed, skipped: $skipped, failed: $failed"
     [[ $failed -eq 0 ]] || return 1
