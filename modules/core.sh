@@ -151,37 +151,15 @@ zg_core_switch() {
         return 1
     fi
 
-    local dir="$ZWEIG_WORKTREE_DIR/$target"
-
-    # Fast path: switch by worktree directory name
-    if [[ -d "$dir" ]]; then
-        cd "$dir" || return
-        echo "📂 Switched to worktree: $target"
-        return 0
+    local dir
+    if ! dir="$(zg_helpers_resolve_worktree "$target")"; then
+        zg_helpers_worktree_not_found "$target"
+        return 1
     fi
 
-    # Fallback: resolve by branch name using porcelain (worktree -> next branch)
-    local worktree_path
-    worktree_path="$(git worktree list --porcelain | awk -v b="$target" '
-        $1=="worktree" {wt=$2}
-        $1=="branch"   {gsub("^refs/heads/","",$2); if ($2==b) {print wt; exit}}
-    ')"
-
-    if [[ -n "$worktree_path" && -d "$worktree_path" ]]; then
-        cd "$worktree_path" || return
-        echo "📂 Switched to worktree for branch: $target"
-        echo "   Path: $worktree_path"
-        return 0
-    fi
-
-    # Not found: provide a helpful hint if the branch exists without a worktree
-    echo "❌ Worktree or branch '$target' not found."
-    zg_helpers_fetch_origin || true
-    if git show-ref --verify --quiet "refs/heads/$target" || \
-        git show-ref --verify --quiet "refs/remotes/origin/$target"; then
-        echo "ℹ️ Branch '$target' exists without a worktree. Try: zg create from $target"
-    fi
-    return 1
+    cd "$dir" || return
+    echo "📂 Switched to worktree: $target"
+    echo "   Path: $dir"
 }
 
 # Resolve worktree directory from name or branch (prints path)
@@ -189,29 +167,8 @@ zg_core_path() {
   local target="$1"
   [[ -n "$target" ]] || { echo "❌ Missing worktree or branch name" >&2; return 2; }
 
-  local dir="$ZWEIG_WORKTREE_DIR/$target"
-  if [[ -d "$dir" ]]; then
-    printf '%s\n' "$dir"; return 0
-  fi
-
-  local worktree_path
-  worktree_path="$(git worktree list --porcelain | awk -v b="$target" '
-    $1=="worktree" {wt=$2}
-    $1=="branch"   {gsub("^refs/heads/","",$2); if ($2==b) {print wt; exit}}
-  ')"
-
-  if [[ -n "$worktree_path" && -d "$worktree_path" ]]; then
-    printf '%s\n' "$worktree_path"; return 0
-  fi
-
-  # Optional hint (freshen remotes quietly)
-  zg_helpers_fetch_origin || true
-  if git show-ref --verify --quiet "refs/heads/$target" || \
-     git show-ref --verify --quiet "refs/remotes/origin/$target"; then
-    echo "ℹ️ Branch '$target' exists without a worktree. Try: zg create from $target" >&2
-  else
-    echo "❌ Worktree or branch '$target' not found." >&2
-  fi
+  zg_helpers_resolve_worktree "$target" && return 0
+  zg_helpers_worktree_not_found "$target"
   return 1
 }
 

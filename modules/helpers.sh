@@ -49,6 +49,42 @@ zg_helpers_worktree_exists() {
     [ -d "$ZWEIG_WORKTREE_DIR/$1" ]
 }
 
+# --- Resolve a worktree identifier to its path (prints the path) ---
+# The identifier is a branch name (canonical identity, see docs/adr/0001).
+# Fast path: a directory of that name under ZWEIG_WORKTREE_DIR (no subprocess).
+# Fallback: match the branch in `git worktree list --porcelain`, which finds
+# worktrees anywhere on disk, including ones other tools created.
+# Returns 1 when nothing matches; prints nothing in that case.
+zg_helpers_resolve_worktree() {
+    local target="$1"
+    [[ -n "$target" ]] || return 1
+
+    if [[ -d "$ZWEIG_WORKTREE_DIR/$target" ]]; then
+        printf '%s\n' "$ZWEIG_WORKTREE_DIR/$target"
+        return 0
+    fi
+
+    local worktree_path
+    worktree_path="$(git worktree list --porcelain | awk -v b="$target" '
+        $1=="worktree" {wt=substr($0, 10)}
+        $1=="branch"   {sub("^refs/heads/","",$2); if ($2==b) {print wt; exit}}
+    ')"
+
+    [[ -n "$worktree_path" && -d "$worktree_path" ]] || return 1
+    printf '%s\n' "$worktree_path"
+}
+
+# --- Explain why a worktree identifier did not resolve (stderr) ---
+zg_helpers_worktree_not_found() {
+    local target="$1"
+    echo "❌ Worktree or branch '$target' not found." >&2
+    zg_helpers_fetch_origin >/dev/null 2>&1 || true
+    if git show-ref --verify --quiet "refs/heads/$target" || \
+       git show-ref --verify --quiet "refs/remotes/origin/$target"; then
+        echo "ℹ️ Branch '$target' exists without a worktree. Try: zg create from $target" >&2
+    fi
+}
+
 
 # Internal helper to check if branch is protected
 zg_helpers_is_protected() {
