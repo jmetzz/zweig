@@ -21,11 +21,45 @@ zg_core_root() {
 }
 
 # --- List all worktrees ---
+# Names only by default; -d/--detail adds an aligned PATH and HEAD table.
 zg_core_list() {
-    git worktree list --porcelain | awk '
-      $1=="worktree"{wt=$2}
-      $1=="branch"{gsub("^refs/heads/","",$2); printf "- %s  (%s)\n", wt, $2}
-    '
+    local detail=0
+    if (($# == 1)) && [[ "$1" == -d || "$1" == --detail ]]; then
+        detail=1
+    elif (($# > 0)); then
+        echo "❌ Usage: zg list [-d|--detail]" >&2
+        return 1
+    fi
+
+    local names dirs current rc=0
+    zg_helpers_load_report_worktrees names dirs current || rc=$?
+    [[ $rc -ne 1 ]] || return 1
+    zg_helpers_colors
+
+    local i mark colour
+    if ((detail == 0)); then
+        for ((i = 0; i < ${#dirs[@]}; i++)); do
+            zg_helpers_report_mark mark colour "$((i == current))"
+            printf '%s%s%s%s\n' "$mark" "$colour" "${names[i]}" "$ZG_C_RESET"
+        done
+        return 0
+    fi
+
+    # Columns start as wide as their headers ("NAME", "PATH").
+    local heads=() name_w=4 path_w=4
+    for ((i = 0; i < ${#dirs[@]}; i++)); do
+        ((${#names[i]} <= name_w)) || name_w=${#names[i]}
+        ((${#dirs[i]} <= path_w)) || path_w=${#dirs[i]}
+        heads+=("$(git -C "${dirs[i]}" rev-parse --short=7 HEAD 2>/dev/null || echo unknown)")
+    done
+    printf '  %-*s  %-*s  %s\n' "$name_w" NAME "$path_w" PATH HEAD
+    for ((i = 0; i < ${#dirs[@]}; i++)); do
+        zg_helpers_report_mark mark colour "$((i == current))"
+        printf '%s%s%-*s%s  %s%-*s%s  %s%s%s\n' \
+            "$mark" "$colour" "$name_w" "${names[i]}" "$ZG_C_RESET" \
+            "$ZG_C_PATH" "$path_w" "${dirs[i]}" "$ZG_C_RESET" \
+            "$ZG_C_HASH" "${heads[i]}" "$ZG_C_RESET"
+    done
 }
 
 # --- Create new branch and worktree from default branch (robust base selection) ---

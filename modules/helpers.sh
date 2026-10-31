@@ -98,7 +98,8 @@ zg_helpers_list_worktrees() {
 }
 
 # --- Load the linked worktrees for a bulk sweep into two arrays ---
-# Usage: zg_helpers_load_worktrees <branches-array> <dirs-array>
+# Usage: zg_helpers_load_worktrees <branches-array> <dirs-array> [--all]
+# With --all the main checkout is included, first (see zg_helpers_list_worktrees).
 # Fills the named arrays in parallel, one element per worktree from
 # zg_helpers_list_worktrees (branch empty for a detached HEAD). A worktree whose
 # directory is missing is left out with a warning on stderr.
@@ -109,7 +110,7 @@ zg_helpers_load_worktrees() {
     local -n _zg_branches="$1" _zg_dirs="$2"
     local listing line branch dir rc=0
     _zg_branches=() _zg_dirs=()
-    if ! listing="$(zg_helpers_list_worktrees)"; then
+    if ! listing="$(zg_helpers_list_worktrees "${3:-}")"; then
         echo "❌ Error: Could not list worktrees." >&2
         return 1
     fi
@@ -127,10 +128,92 @@ zg_helpers_load_worktrees() {
     return "$rc"
 }
 
-# --- Name a worktree in output: its branch, or its directory name if detached ---
+# --- Name a worktree in messages (warnings, skip and sync lines) ---
+# Its branch, or its directory name if detached: short, and points at the path.
+# Reports (list, status, select) use zg_helpers_worktree_name instead.
 zg_helpers_worktree_label() {
     local branch="$1" dir="$2"
     if [[ -n "$branch" ]]; then printf '%s\n' "$branch"; else basename "$dir"; fi
+}
+
+# --- Name a worktree in reports (list, status, select) ---
+# Its branch, or "(detached: <sha7>)" for a detached HEAD.
+zg_helpers_worktree_name() {
+    local branch="$1" dir="$2"
+    if [[ -n "$branch" ]]; then
+        printf '%s\n' "$branch"
+    else
+        printf '(detached: %s)\n' "$(git -C "$dir" rev-parse --short=7 HEAD 2>/dev/null || echo unknown)"
+    fi
+}
+
+# --- Load every worktree for a report: main checkout first, the rest by name ---
+# Usage: zg_helpers_load_report_worktrees <names-array> <dirs-array> <current-var>
+# Names come from zg_helpers_worktree_name. <current-var> gets the index of the
+# worktree the user is in, or -1. Same return codes and missing directory
+# warnings as zg_helpers_load_worktrees.
+zg_helpers_load_report_worktrees() {
+    local -n _zg_names="$1" _zg_rdirs="$2" _zg_current="$3"
+    # Locals are prefixed: an unprefixed "dirs" would shadow the caller's array
+    # that the _zg_rdirs nameref points at.
+    local _zg_rep_branches _zg_rep_dirs i line top sorted="" rc=0
+    _zg_names=() _zg_rdirs=() _zg_current=-1
+    zg_helpers_load_worktrees _zg_rep_branches _zg_rep_dirs --all || rc=$?
+    [[ $rc -ne 1 ]] || return 1
+    for ((i = 0; i < ${#_zg_rep_dirs[@]}; i++)); do
+        if ((i == 0)); then
+            _zg_names+=("$(zg_helpers_worktree_name "${_zg_rep_branches[0]}" "${_zg_rep_dirs[0]}")")
+            _zg_rdirs+=("${_zg_rep_dirs[0]}")
+        else
+            # "<name>\t<index>": names can't contain a tab, so the index splits off cleanly.
+            sorted+="$(zg_helpers_worktree_name "${_zg_rep_branches[i]}" "${_zg_rep_dirs[i]}")"$'\t'"$i"$'\n'
+        fi
+    done
+    if [[ -n "$sorted" ]]; then
+        # Case-insensitive byte order: alphabetical, and the same in every locale.
+        sorted="$(LC_ALL=C sort -f <<<"${sorted%$'\n'}")"
+        while IFS= read -r line; do
+            _zg_names+=("${line%$'\t'*}")
+            _zg_rdirs+=("${_zg_rep_dirs[${line##*$'\t'}]}")
+        done <<<"$sorted"
+    fi
+
+    # The current worktree is the one whose top level the user is in. Physical
+    # paths, so symlinked prefixes (macOS /var) can't hide a match; a plain
+    # prefix test would also wrongly mark the main checkout from inside a
+    # linked worktree nested under it (e.g. .worktrees/foo).
+    top="$(git rev-parse --show-toplevel 2>/dev/null)" && top="$(cd "$top" && pwd -P)" || top=""
+    for ((i = 0; i < ${#_zg_rdirs[@]}; i++)); do
+        if [[ -n "$top" && "$(cd "${_zg_rdirs[i]}" 2>/dev/null && pwd -P)" == "$top" ]]; then
+            _zg_current=$i
+            break
+        fi
+    done
+    return "$rc"
+}
+
+# --- Pick a report row's marker and name colour ---
+# Usage: zg_helpers_report_mark <mark-var> <colour-var> <is-current: 0|1>
+# Call zg_helpers_colors first. The marker is two columns wide either way.
+zg_helpers_report_mark() {
+    local -n _zg_mark="$1" _zg_colour="$2"
+    if [[ "$3" == 1 ]]; then
+        _zg_mark="${ZG_C_CUR}*${ZG_C_RESET} " _zg_colour="$ZG_C_CUR"
+    else
+        _zg_mark="  " _zg_colour="$ZG_C_NAME"
+    fi
+}
+
+# --- Set the report colours (ZG_C_* globals) ---
+# Empty when NO_COLOR is set (https://no-color.org) or stdout is not a terminal,
+# so piped output stays plain and scriptable.
+# shellcheck disable=SC2034  # read by list and status in the other modules
+zg_helpers_colors() {
+    ZG_C_RESET="" ZG_C_NAME="" ZG_C_PATH="" ZG_C_HASH="" ZG_C_CUR=""
+    if [[ -z "${NO_COLOR:-}" && -t 1 ]]; then
+        ZG_C_RESET=$'\e[0m' ZG_C_NAME=$'\e[36m' ZG_C_PATH=$'\e[90m'
+        ZG_C_HASH=$'\e[33m' ZG_C_CUR=$'\e[1;32m'
+    fi
 }
 
 # --- Fail if a branch is already checked out in any worktree ---
@@ -292,7 +375,8 @@ zg_helpers_help() {
 Zweig CLI (alias: zg)
 
 Worktree Core Lifecycle:
-  zg list                           List all worktrees.
+  zg list [-d|--detail]             List all worktrees by name: main checkout first, the
+                                     current one marked *. -d adds an aligned PATH/HEAD table.
   zg create <worktree name>         Create a new worktree (and local branch) from the default branch.
   zg create from <branch>           Create a worktree from an existing branch.
   zg create from-pr <pr-id>         Create worktree from GitHub PR (requires gh).
@@ -311,8 +395,8 @@ Worktree Core Lifecycle:
   zg unprotect <worktree>           Remove protection marker from a worktree.
 
 Maintenance:
-  zg status                         Show sync status of every worktree of the repo,
-                                     wherever it lives on disk.
+  zg status                         Show sync status (ahead/behind) of every worktree of the
+                                     repo, wherever it lives on disk, current one marked *.
   zg sync [all|current|<wtree>]     Sync worktrees with the default branch (or specified).
                                      'all' covers every worktree of the repo, wherever
                                      it lives on disk; detached ones are skipped.

@@ -398,15 +398,15 @@ make_repo_with_origin() {
     git push -q -u origin main
 }
 
-@test "zg status reports outside and zg-created worktrees by branch, not the main checkout" {
+@test "zg status reports the main checkout, outside and zg-created worktrees by branch" {
     make_repo_with_origin
     git worktree add -q -b ext "$TEST_ROOT/outside"
     "$ZG" create foo >/dev/null
     run "$ZG" status
     [ "$status" -eq 0 ]
-    [[ "$output" == *"- ext: ↑0 ↓0"* ]]
-    [[ "$output" == *"- foo: ↑0 ↓0"* ]]
-    [[ "$output" != *"- main:"* ]]
+    [[ "$output" == *" ext "*"↑0 ↓0"* ]]
+    [[ "$output" == *" foo "*"↑0 ↓0"* ]]
+    [[ "${lines[1]}" == [\ *]" main "* ]]
 }
 
 # Regression guard: prune metadata is plain `git worktree prune`, already
@@ -485,22 +485,22 @@ make_repo_with_origin() {
     git worktree add -q --detach "$TEST_ROOT/out side"
     run "$ZG" status
     [ "$status" -eq 0 ]
-    [[ "$output" == *"- out side: ↑0 ↓0"* ]]
+    [[ "$output" == *" (detached: $(git rev-parse --short=7 HEAD)) "*"↑0 ↓0"* ]]
     run bash -c 'echo y | "$1" prune trees' _ "$ZG"
     [ "$status" -eq 0 ]
     [ -d "$TEST_ROOT/out side" ]
 }
 
-@test "zg status lists the other worktrees, not the main checkout, when run from a linked worktree" {
+@test "zg status lists every worktree, including the main checkout, when run from a linked worktree" {
     make_repo_with_origin
     git worktree add -q -b ext "$TEST_ROOT/outside"
     "$ZG" create foo >/dev/null
     cd "$TEST_ROOT/outside"
     run "$ZG" status
     [ "$status" -eq 0 ]
-    [[ "$output" == *"- ext: ↑0 ↓0"* ]]
-    [[ "$output" == *"- foo: ↑0 ↓0"* ]]
-    [[ "$output" != *"- main:"* ]]
+    [[ "$output" == *" ext "*"↑0 ↓0"* ]]
+    [[ "$output" == *" foo "*"↑0 ↓0"* ]]
+    [[ "${lines[1]}" == [\ *]" main "* ]]
 }
 
 @test "zg status, prune trees and sync all succeed with no linked worktrees" {
@@ -582,7 +582,7 @@ make_repo_with_origin() {
     git push -q origin feature/x
     run "$ZG" status
     [ "$status" -eq 0 ]
-    [[ "$output" == *"- feature/x: ↑0 ↓0"* ]]
+    [[ "$output" == *" feature/x "*"↑0 ↓0"* ]]
     git push -q origin --delete feature/x
     run bash -c 'echo y | "$1" prune trees' _ "$ZG"
     [ "$status" -eq 0 ]
@@ -926,4 +926,110 @@ STUB
     run "$ZG" migrate
     [ "$status" -eq 0 ]
     [ "$(git -C "$REPO/.worktrees/main-fix" branch --show-current)" = "main-fix" ]
+}
+
+# Byte offset of the first occurrence of $2 in $1 (both columns and markers are
+# ASCII or the same multibyte glyph on every row, so bytes compare fine).
+col_of() { local prefix="${1%%"$2"*}"; echo "${#prefix}"; }
+
+@test "zg list shows names only, main first then sorted, and marks the current worktree" {
+    make_repo
+    git worktree add -q -b zeta "$TEST_ROOT/elsewhere/zeta"
+    git worktree add -q -b alpha "$REPO/.worktrees/alpha"
+    git worktree add -q --detach "$TEST_ROOT/elsewhere/loose"
+    local sha7; sha7="$(git rev-parse --short=7 HEAD)"
+    run "$ZG" list
+    [ "$status" -eq 0 ]
+    [ "$output" = "$(printf '%s\n' "* main" "  (detached: $sha7)" "  alpha" "  zeta")" ]
+    cd "$TEST_ROOT/elsewhere/zeta"
+    run "$ZG" list
+    [ "$status" -eq 0 ]
+    [ "$output" = "$(printf '%s\n' "  main" "  (detached: $sha7)" "  alpha" "* zeta")" ]
+}
+
+@test "zg list -d and --detail print an aligned NAME/PATH/HEAD table" {
+    make_repo
+    git worktree add -q -b feature/long-name "$TEST_ROOT/elsewhere/x"
+    local sha7 flag row path_col head_col
+    sha7="$(git rev-parse --short=7 HEAD)"
+    for flag in -d --detail; do
+        run "$ZG" list "$flag"
+        [ "$status" -eq 0 ]
+        [ "${#lines[@]}" -eq 3 ]
+        [[ "${lines[0]}" =~ ^"  NAME "+"PATH "+"HEAD"$ ]]
+        path_col="$(col_of "${lines[0]}" PATH)" head_col="$(col_of "${lines[0]}" HEAD)"
+        for row in "${lines[@]:1}"; do
+            [ "${row:$path_col:1}" = "/" ]
+            [ "${row:$head_col}" = "$sha7" ]
+        done
+        [[ "${lines[1]}" == "* main "*"/repo "* ]]
+        [[ "${lines[2]}" == "  feature/long-name "*"/elsewhere/x "* ]]
+    done
+}
+
+@test "zg list rejects an unknown flag or extra arguments with usage on stderr" {
+    make_repo
+    local args
+    for args in "--bogus" "-d extra"; do
+        # shellcheck disable=SC2086
+        run --separate-stderr "$ZG" list $args
+        [ "$status" -ne 0 ]
+        [[ "$stderr" == *"Usage: zg list [-d|--detail]"* ]]
+    done
+}
+
+@test "zg list and status print no ANSI codes when not on a terminal" {
+    make_repo_with_origin
+    git worktree add -q -b ext "$TEST_ROOT/outside"
+    run "$ZG" list
+    [[ "$output" != *$'\e'* ]]
+    run "$ZG" list -d
+    [[ "$output" != *$'\e'* ]]
+    run "$ZG" status
+    [[ "$output" != *$'\e'* ]]
+}
+
+@test "zg status aligns its columns, lists main first and marks the current worktree" {
+    make_repo_with_origin
+    git worktree add -q -b a-much-longer-name "$TEST_ROOT/outside"
+    git -C "$TEST_ROOT/outside" commit -q --allow-empty -m "feat: ahead"
+    git worktree add -q --detach "$TEST_ROOT/loose"
+    local sha7 row up_col down_col
+    sha7="$(git rev-parse --short=7 HEAD)"
+    run "$ZG" status
+    [ "$status" -eq 0 ]
+    [ "${#lines[@]}" -eq 4 ]
+    [[ "${lines[1]}" == "* main "*"↑0 ↓0" ]]
+    [[ "${lines[2]}" == "  (detached: $sha7) "*"↑0 ↓0" ]]
+    [[ "${lines[3]}" == "  a-much-longer-name "*"↑1 ↓0" ]]
+    up_col="$(col_of "${lines[1]}" "↑")" down_col="$(col_of "${lines[1]}" "↓")"
+    for row in "${lines[@]:1}"; do
+        [ "$(col_of "$row" "↑")" -eq "$up_col" ]
+        [ "$(col_of "$row" "↓")" -eq "$down_col" ]
+    done
+    cd "$TEST_ROOT/outside"
+    run "$ZG" status
+    [[ "${lines[1]}" == "  main "* ]]
+    [[ "${lines[3]}" == "* a-much-longer-name "* ]]
+}
+
+@test "zg list sorts names case-insensitively and shows detached rows in the detail table" {
+    make_repo
+    git worktree add -q -b Zed "$TEST_ROOT/elsewhere/zed"
+    git worktree add -q -b alpha "$TEST_ROOT/elsewhere/alpha"
+    git worktree add -q --detach "$TEST_ROOT/elsewhere/loose"
+    local sha7; sha7="$(git rev-parse --short=7 HEAD)"
+    run "$ZG" list
+    [ "$output" = "$(printf '%s\n' "* main" "  (detached: $sha7)" "  alpha" "  Zed")" ]
+    run "$ZG" list -d
+    [ "$status" -eq 0 ]
+    [[ "${lines[2]}" == "  (detached: $sha7) "*"/elsewhere/loose "*"$sha7" ]]
+}
+
+@test "zg status shows ? when there is no origin to compare against" {
+    make_repo
+    git worktree add -q -b ext "$TEST_ROOT/outside"
+    run "$ZG" status
+    [ "$status" -eq 0 ]
+    [[ "${lines[-1]}" == "  ext "*"↑? ↓?" ]]
 }

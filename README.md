@@ -17,6 +17,7 @@ Managing `git worktree` is powerful but painful.
 - 🔒 Automation-safe: no accidental deletions
 - ⚙️ Modular Bash codebase: core + optional extensions (`gh`, `fzf`)
 - 🪶 Lightweight: pure shell + Git only (no exotic dependencies for core functionalities)
+- 👀 Readable reports: `zg list` (names, current one marked `*`; `-d`/`--detail` adds an aligned PATH/HEAD table) and `zg status` (aligned ahead/behind per worktree)
 - 🪴 Built with trunk-based dev + semantic releases
 
 ## Dependencies
@@ -29,12 +30,13 @@ Managing `git worktree` is powerful but painful.
 You can configure `zweig` behavior using the following environment variables.
 To override the defaults, you must export these variables manually in your shell rc file (e.g., `.bashrc`, `.zshrc`):
 
-- `ZWEIG_WORKTREE_DIR`: Specifies the base directory where worktrees are created. It doesn't limit which worktrees zg manages: bulk commands (`status`, `sync all`, `prune trees`, `remove merged`, `select`) act on every worktree of the repo, wherever it lives on disk, and `migrate` skips any branch already checked out in one of them.
+- `ZWEIG_WORKTREE_DIR`: Specifies the base directory where worktrees are created. It doesn't limit which worktrees zg manages: bulk commands (`list`, `status`, `sync all`, `prune trees`, `remove merged`, `select`) act on every worktree of the repo, wherever it lives on disk, and `migrate` skips any branch already checked out in one of them.
     Default: `<repo-root>/.worktrees`, resolved per repository (same directory whether you're in the main checkout or an existing worktree). Falls back to `$HOME/.worktrees` when run outside a Git repository.
 - `ZWEIG_DEFAULT_BRANCH`: Sets the default main branch name for operations (e.g., `create`, `sync`).
     Default: `main`
 - `ZWEIG_DEFAULT_SYNC_SCOPE`: Defines the default scope for `zg sync` if no argument is provided.
     Default: `current`
+- `NO_COLOR`: When set (to any value), `zg list` and `zg status` print without colours. Colours are also off whenever output is not a terminal (e.g. piped).
 - `ZWEIG_COPY_ON_CREATE`: Space-separated list of local files/directories (relative to the repo root) copied into every newly created worktree, when present in the source and absent in the target. Never overwrites.
     Default: `.env .env.local .env.development .env.test .env.production AGENTS.md CLAUDE.md GEMINI.md .claude .cursor .codex .antigravity`
 

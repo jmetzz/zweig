@@ -16,10 +16,7 @@ zg_extensions_select() {
     zg_helpers_load_worktrees branches dirs || rc=$?
     [[ $rc -ne 1 ]] || return 1
     for ((i = 0; i < ${#dirs[@]}; i++)); do
-        label="${branches[i]}"
-        if [[ -z "$label" ]]; then
-            label="(detached: $(git -C "${dirs[i]}" rev-parse --short=7 HEAD 2>/dev/null || echo unknown))"
-        fi
+        label="$(zg_helpers_worktree_name "${branches[i]}" "${dirs[i]}")"
         # Refs can't contain a tab, so "<label>\t<path>" splits unambiguously.
         menu+="$label"$'\t'"${dirs[i]}"$'\n'
     done

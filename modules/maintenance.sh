@@ -6,19 +6,31 @@
 # Requires: bash 4.3+ (namerefs, via zg_helpers_load_worktrees)
 
 # --- Show sync status ---
+# One aligned row per worktree (main checkout first): name, commits ahead of and
+# behind origin/<default>, the current worktree marked *.
 zg_maintenance_status() {
     zg_helpers_fetch_origin || return 1
     echo "📊 Worktree sync status (vs origin/$ZWEIG_DEFAULT_BRANCH):"
-    local branches dirs i branch dir ahead behind rc=0
+    local names dirs current i rc=0
     # A missing directory (rc 2) is only warned about: status is a read-only report.
-    zg_helpers_load_worktrees branches dirs || rc=$?
+    zg_helpers_load_report_worktrees names dirs current || rc=$?
     [[ $rc -ne 1 ]] || return 1
+    zg_helpers_colors
+
+    # "?" rather than 0 when git can't count (e.g. no origin/<default>): a
+    # made-up 0 would read as "in sync".
+    local mark colour aheads=() behinds=() name_w=0 ahead_w=0
     # ${#dirs[@]}, not "${!dirs[@]}": the latter trips set -u on an empty array before bash 4.4.
     for ((i = 0; i < ${#dirs[@]}; i++)); do
-        branch="${branches[i]}" dir="${dirs[i]}"
-        ahead=$(git -C "$dir" rev-list --count origin/"$ZWEIG_DEFAULT_BRANCH"..HEAD 2>/dev/null || echo 0)
-        behind=$(git -C "$dir" rev-list --count HEAD..origin/"$ZWEIG_DEFAULT_BRANCH" 2>/dev/null || echo 0)
-        echo "- $(zg_helpers_worktree_label "$branch" "$dir"): ↑$ahead ↓$behind"
+        aheads+=("$(git -C "${dirs[i]}" rev-list --count "origin/$ZWEIG_DEFAULT_BRANCH..HEAD" 2>/dev/null || echo "?")")
+        behinds+=("$(git -C "${dirs[i]}" rev-list --count "HEAD..origin/$ZWEIG_DEFAULT_BRANCH" 2>/dev/null || echo "?")")
+        ((${#names[i]} <= name_w)) || name_w=${#names[i]}
+        ((${#aheads[i]} <= ahead_w)) || ahead_w=${#aheads[i]}
+    done
+    for ((i = 0; i < ${#dirs[@]}; i++)); do
+        zg_helpers_report_mark mark colour "$((i == current))"
+        printf '%s%s%-*s%s  ↑%-*s ↓%s\n' "$mark" "$colour" "$name_w" "${names[i]}" "$ZG_C_RESET" \
+            "$ahead_w" "${aheads[i]}" "${behinds[i]}"
     done
 }
 
