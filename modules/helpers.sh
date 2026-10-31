@@ -103,8 +103,21 @@ zg_helpers_report_worktree_not_found() {
     fi
 }
 
+# --- Print the branch checked out in a worktree directory ---
+# Prints an empty line for a detached HEAD. Returns 1, with an error on stderr,
+# only if git can't read the directory at all.
+zg_helpers_worktree_branch() {
+    local branch
+    if ! branch="$(git -C "$1" branch --show-current 2>/dev/null)"; then
+        echo "❌ Cannot read the branch checked out in $1." >&2
+        return 1
+    fi
+    printf '%s\n' "$branch"
+}
+
 # --- True if the current directory is the given directory or inside it ---
 # Compares physical paths, so symlinked prefixes (macOS /var) can't hide a match.
+# A directory that doesn't exist counts as "not inside".
 zg_helpers_inside_dir() {
     local dir here
     dir="$(cd "$1" 2>/dev/null && pwd -P)" || return 1
@@ -119,7 +132,9 @@ zg_helpers_is_protected() {
     if [[ "$wtree" == "$ZWEIG_DEFAULT_BRANCH" ]]; then
         return 0
     fi
-    # Or its worktree, wherever it lives, is marked with a .protected file
+    # Or its worktree, wherever it lives, is marked with a .protected file.
+    # An identifier that resolves to no worktree counts as not protected:
+    # there is nothing on disk to protect.
     dir="$(zg_helpers_resolve_worktree "$wtree")" || return 1
     [[ -f "$dir/.protected" ]]
 }
