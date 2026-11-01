@@ -15,8 +15,8 @@ with `<name>` equal to the branch name. Neither holds in practice:
 - Other tools (Claude Code, Codex, plain `git worktree add`) create worktrees
   wherever they choose, under directory names zg doesn't control.
 - zg itself breaks the equality: `zg migrate` flattens `feature/foo` into a
-  `feature__foo` directory, and `zg create from-pr` names directories after the
-  PR rather than the branch.
+  `feature__foo` directory, and `zg create from-pr` names directories
+  `pr-<N>-<branch>` (older versions used the bare PR number).
 
 Commands that build `$ZWEIG_WORKTREE_DIR/<name>` therefore can't see or act on
 a large class of real worktrees.
@@ -47,8 +47,9 @@ differ from the branch (e.g. migrated `feature__foo`).
 - If a directory under `$ZWEIG_WORKTREE_DIR` shares its name with a
   *different* branch, the fast path wins and that branch is unreachable by
   name. Most zg-created directories are named after their branch, but not all:
-  `zg migrate` flattens `a/b` to `a__b`, and `zg create from-pr` uses the PR
-  number, so a branch literally named `a__b` or `42` can be shadowed. This is
+  `zg migrate` flattens `a/b` to `a__b`, and `zg create from-pr` uses
+  `pr-<N>-<branch>` (the bare PR number in older versions), so a branch
+  literally named `a__b`, `pr-42-x` or `42` can be shadowed. This is
   accepted: such names are rare, and the directory stays reachable by its
   directory name.
 - Detached-HEAD worktrees have no branch and are only reachable via the fast

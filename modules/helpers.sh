@@ -469,7 +469,9 @@ Worktree Core Lifecycle:
                                      current one marked *. -d adds an aligned PATH/HEAD table.
   zg create <worktree name>         Create a new worktree (and local branch) from the default branch.
   zg create from <branch>           Create a worktree from an existing branch.
-  zg create from-pr <pr-id>         Create worktree from GitHub PR (requires gh).
+  zg create from-pr <pr-id>         Create worktree from GitHub PR (requires gh), named
+                                     pr-<id>-<branch> ("/" becomes "-"); reuses the PR's
+                                     worktree if its branch already has one.
   zg create ... -s                  Add -s to any create form to switch into it immediately
                                      (requires the shell shim; see shims/shims.sh).
   zg (remove|rm) <worktree>         Remove a worktree but keeps the branch.
@@ -506,7 +508,7 @@ Meta:
 Extensions:
   zg select                         Fuzzy switch to any worktree of the repo, with a git log
                                      preview (requires fzf).
-  zg create from-pr <pr-id>         Create worktree from GitHub PR (requires gh).
+  zg create from-pr <pr-id>         Create worktree pr-<id>-<branch> from GitHub PR (requires gh).
 
 Commands that move you (switch/cd, main, root, select, create -s, create from-pr)
 change your shell's directory only with the shell shim sourced; without it they
