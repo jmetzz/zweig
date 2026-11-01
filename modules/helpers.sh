@@ -26,6 +26,10 @@ zg_helpers_inside_control_repo() {
     return 0
 }
 
+zg_helpers_has_origin() {
+    git remote get-url origin >/dev/null 2>&1
+}
+
 # Fetch origin safely (used by status/sync/prune). Quiet by default.
 zg_helpers_fetch_origin() {
     # Ensure we're inside a Git repository
@@ -35,7 +39,7 @@ zg_helpers_fetch_origin() {
     }
 
     # If 'origin' is configured, fetch from it; otherwise, skip gracefully
-    if git remote get-url origin >/dev/null 2>&1; then
+    if zg_helpers_has_origin; then
         git fetch origin --prune --quiet || {
             echo "❌ Error: Failed to fetch from origin. Check network/credentials." >&2
             return 1
@@ -496,8 +500,9 @@ Maintenance:
   zg prune metadata                 Prune broken worktree metadata.
   zg prune trees                    Prune worktrees for deleted remote branches, covering
                                      every worktree of the repo, wherever it lives on disk.
-                                     Only branches whose upstream on origin is gone count;
-                                     never-pushed branches are kept. Requires an origin remote.
+                                     Only branches tracking a now-deleted origin branch
+                                     (pushed with -u) count; others are kept. Requires an
+                                     origin remote.
   zg migrate                        Migrate existing branches to worktrees, skipping branches
                                      already checked out in any worktree.
 

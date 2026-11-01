@@ -57,25 +57,35 @@ zg_maintenance_prune_metadata() {
     echo "✅ Done."
 }
 
-# A branch's remote counterpart is gone when its upstream is on origin and git
-# reports it `[gone]`. Run after `git fetch --prune`. A branch that was never
-# pushed, tracks a local branch or another remote, or whose upstream origin's
-# fetch refspec doesn't map, is not gone: there's nothing on origin to compare.
+# True when the branch's upstream is on origin and git reports it `[gone]`.
+# Only meaningful after `git fetch --prune` (prune trees runs
+# zg_helpers_fetch_origin first). A branch is not gone when:
+#   - it has no upstream (never pushed, or pushed without -u);
+#   - its upstream is a local branch or on another remote;
+#   - its upstream is on origin, but origin's fetch refspec doesn't cover it, so
+#     there's no remote-tracking ref for git to report gone.
 zg_maintenance__upstream_gone() {
-    [[ "$(git for-each-ref --format='%(upstream:remotename) %(upstream:track)' "refs/heads/$1")" == "origin [gone]" ]]
+    local branch="$1"
+    # The format prints "<remote> <track>", e.g. "origin [gone]".
+    [[ "$(git for-each-ref --format='%(upstream:remotename) %(upstream:track)' "refs/heads/$branch")" == "origin [gone]" ]]
 }
 
 # --- Prune worktrees for deleted remote branches ---
 zg_maintenance_prune_trees() {
     local force="false"
 
-    # Check for --force flag
-    if [[ "${1:-}" == "--force" ]]; then
-        force="true"
-    fi
+    case "${1:-}" in
+        "") ;;
+        --force) force="true" ;;
+        *)
+            echo "❌ Error: Unknown argument: $1 (usage: zg prune trees [--force])" >&2
+            return 1
+            ;;
+    esac
 
     # Without origin no branch can be told apart from a never-pushed one.
-    if ! git remote get-url origin >/dev/null 2>&1; then
+    # Checked before the prompt, so we never ask to confirm a refusal.
+    if ! zg_helpers_has_origin; then
         echo "❌ Error: No 'origin' remote configured; can't tell which remote branches are gone." >&2
         return 1
     fi
@@ -92,14 +102,14 @@ zg_maintenance_prune_trees() {
     zg_helpers_fetch_origin || return 1
     echo "🔍 Checking for deleted remote branches..."
 
-    local branches dirs i branch dir failed=0 rc=0
+    local branches dirs i branch dir failed=0 pruned=0 rc=0
     # A worktree with a missing directory is only warned about here: it isn't a
     # prune failure, and `zg prune metadata` cleans it up.
     zg_helpers_load_worktrees branches dirs || rc=$?
     [[ $rc -ne 1 ]] || return 1
     for ((i = 0; i < ${#dirs[@]}; i++)); do
         branch="${branches[i]}" dir="${dirs[i]}"
-        # A detached worktree has no branch to look up on the remote.
+        # A detached worktree has no branch, so no upstream to check.
         [[ -n "$branch" ]] || continue
 
         if zg_helpers_dir_is_protected "$branch" "$dir"; then
@@ -109,6 +119,7 @@ zg_maintenance_prune_trees() {
 
         if zg_maintenance__upstream_gone "$branch"; then
             echo "🔥 Remote branch gone: $branch"
+            pruned=$((pruned + 1))
             if ! git worktree remove "$dir"; then
                 echo "❌ Failed to remove worktree dir: $dir" >&2
                 failed=1
@@ -133,6 +144,10 @@ zg_maintenance_prune_trees() {
     if [[ $failed -ne 0 ]]; then
         echo "⚠️ Some worktrees could not be pruned. See messages above." >&2
         return 1
+    fi
+    if ((pruned == 0)); then
+        echo "ℹ️ No worktrees with a gone upstream found."
+        return 0
     fi
     echo "✅ Cleanup complete."
 }

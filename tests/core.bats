@@ -620,12 +620,15 @@ make_repo_with_origin() {
 
 @test "zg prune trees keeps worktrees whose branch was never pushed" {
     make_repo_with_origin
+    # ext has no upstream; foo (from zg create) tracks origin/main, which still
+    # exists; local-only tracks the local main. None has a gone origin upstream.
     git worktree add -q -b ext "$TEST_ROOT/outside"
     "$ZG" create foo >/dev/null
     git branch -q --track local-only main
     git worktree add -q "$TEST_ROOT/tracks-local" local-only
     run "$ZG" prune trees --force
     [ "$status" -eq 0 ]
+    [[ "$output" == *"No worktrees with a gone upstream found."* ]]
     [ -d "$TEST_ROOT/outside" ]
     [ -d "$REPO/.worktrees/foo" ]
     [ -d "$TEST_ROOT/tracks-local" ]
@@ -650,6 +653,8 @@ make_repo_with_origin() {
 
 @test "zg prune trees keeps a live branch that origin's fetch refspec doesn't map" {
     make_repo_with_origin
+    # Fetch only main: ext's upstream has no remote-tracking ref, so git can't
+    # report it [gone] even though the branch is live on origin.
     git config remote.origin.fetch '+refs/heads/main:refs/remotes/origin/main'
     git worktree add -q -b ext "$TEST_ROOT/outside"
     git push -q -u origin ext
@@ -657,6 +662,57 @@ make_repo_with_origin() {
     [ "$status" -eq 0 ]
     [ -d "$TEST_ROOT/outside" ]
     git show-ref --verify --quiet refs/heads/ext
+}
+
+@test "zg prune trees prunes a branch deleted on origin by someone else" {
+    make_repo_with_origin
+    git worktree add -q -b ext "$TEST_ROOT/outside"
+    git push -q -u origin ext
+    # Deleted directly on origin: the local remote-tracking ref survives until
+    # prune trees' own fetch --prune drops it.
+    git --git-dir="$TEST_ROOT/origin.git" branch -q -D ext
+    git show-ref --verify --quiet refs/remotes/origin/ext
+    run "$ZG" prune trees --force
+    [ "$status" -eq 0 ]
+    [ ! -e "$TEST_ROOT/outside" ]
+    ! git show-ref --verify --quiet refs/heads/ext
+}
+
+@test "zg prune trees removes nothing when the fetch from origin fails" {
+    make_repo_with_origin
+    git worktree add -q -b ext "$TEST_ROOT/outside"
+    git push -q -u origin ext
+    git push -q origin --delete ext
+    git remote set-url origin "$TEST_ROOT/missing.git"
+    run --separate-stderr "$ZG" prune trees --force
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"Failed to fetch from origin"* ]]
+    [ -d "$TEST_ROOT/outside" ]
+    git show-ref --verify --quiet refs/heads/ext
+}
+
+@test "zg prune trees removes nothing when the prompt is declined" {
+    make_repo_with_origin
+    git worktree add -q -b ext "$TEST_ROOT/outside"
+    git push -q -u origin ext
+    git push -q origin --delete ext
+    run bash -c 'echo n | "$1" prune trees' _ "$ZG"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Operation cancelled."* ]]
+    [ -d "$TEST_ROOT/outside" ]
+    git show-ref --verify --quiet refs/heads/ext
+}
+
+@test "zg prune trees rejects an unknown argument and removes nothing" {
+    make_repo_with_origin
+    git worktree add -q -b ext "$TEST_ROOT/outside"
+    git push -q -u origin ext
+    git push -q origin --delete ext
+    run --separate-stderr bash -c 'echo y | "$1" prune trees --forse' _ "$ZG"
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"Unknown argument: --forse"* ]]
+    [[ "$output" != *"Are you sure"* ]]
+    [ -d "$TEST_ROOT/outside" ]
 }
 
 @test "zg prune trees refuses without an origin remote and removes nothing" {
