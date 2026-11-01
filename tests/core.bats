@@ -2071,3 +2071,78 @@ make_nested_dotgit_repo() {
     [ "$status" -eq 0 ]
     [ -d "$TEST_ROOT/.worktrees/foo" ]
 }
+
+# Worktrees with an initialized submodule (#38, deferred): zg keeps git's
+# behaviour. git refuses to remove them without --force, and so does zg.
+
+# Adds a one-commit "sub" repo as a submodule of the current repo, creates
+# worktree $1 (branch $1) outside the repo, and initializes the submodule there.
+make_worktree_with_submodule() {
+    local name="$1"
+    git init -q -b main "$TEST_ROOT/sub"
+    git -C "$TEST_ROOT/sub" commit -q --allow-empty -m "chore: sub init"
+    git -c protocol.file.allow=always submodule add -q "$TEST_ROOT/sub" sub
+    git commit -q -m "chore: add submodule"
+    git worktree add -q -b "$name" "$TEST_ROOT/wt-$name"
+    git -C "$TEST_ROOT/wt-$name" -c protocol.file.allow=always submodule update --init -q
+}
+
+@test "zg remove refuses a worktree with an initialized submodule, as git does" {
+    make_repo
+    make_worktree_with_submodule sm
+    run bash -c 'echo y | "$1" remove sm' _ "$ZG"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"cannot be moved or removed"* ]]
+    [ -d "$TEST_ROOT/wt-sm/sub" ]
+    git show-ref --verify --quiet refs/heads/sm
+}
+
+@test "zg remove --force removes a worktree with an initialized submodule and keeps its branch" {
+    make_repo
+    make_worktree_with_submodule sm
+    run "$ZG" remove sm --force
+    [ "$status" -eq 0 ]
+    [ ! -e "$TEST_ROOT/wt-sm" ]
+    git show-ref --verify --quiet refs/heads/sm
+}
+
+@test "zg finalize refuses a worktree with an initialized submodule and keeps its branch" {
+    make_repo
+    make_worktree_with_submodule sm
+    run bash -c 'echo y | "$1" finalize sm' _ "$ZG"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"cannot be moved or removed"* ]]
+    [ -d "$TEST_ROOT/wt-sm/sub" ]
+    git show-ref --verify --quiet refs/heads/sm
+}
+
+@test "zg finalize --force removes a worktree with an initialized submodule and its merged branch" {
+    make_repo
+    make_worktree_with_submodule sm
+    run "$ZG" finalize sm --force
+    [ "$status" -eq 0 ]
+    [ ! -e "$TEST_ROOT/wt-sm" ]
+    ! git show-ref --verify --quiet refs/heads/sm
+}
+
+@test "zg rebuild refuses a worktree with an initialized submodule and leaves it in place" {
+    make_repo
+    make_worktree_with_submodule sm
+    run bash -c 'echo y | "$1" rebuild sm' _ "$ZG"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"cannot be moved or removed"* ]]
+    [ -d "$TEST_ROOT/wt-sm/sub" ]
+    [[ "$output" != *"Rebuilt"* ]]
+}
+
+@test "zg prune trees keeps a gone worktree with an initialized submodule and exits non-zero" {
+    make_repo_with_origin
+    make_worktree_with_submodule sm
+    git push -q -u origin sm
+    git push -q origin --delete sm
+    run bash -c 'echo y | "$1" prune trees' _ "$ZG"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"cannot be moved or removed"* ]]
+    [ -d "$TEST_ROOT/wt-sm/sub" ]
+    git show-ref --verify --quiet refs/heads/sm
+}
