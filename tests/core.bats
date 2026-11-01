@@ -1929,6 +1929,27 @@ make_symlinked_git_repo() {
     [ ! -e "$TEST_ROOT/.worktrees" ]
 }
 
+# Git accepts a gitfile with CRLF line endings or without a final newline.
+@test "zg create reads a .git gitfile with CRLF line endings" {
+    git init -q -b main --separate-git-dir "$TEST_ROOT/sepgit" "$TEST_ROOT/sep"
+    cd "$TEST_ROOT/sep"
+    git commit -q --allow-empty -m "chore: init"
+    printf 'gitdir: %s\r\n' "$TEST_ROOT/sepgit" >"$TEST_ROOT/sep/.git"
+    run --separate-stderr "$ZG" create foo
+    [ "$status" -eq 0 ]
+    [ -d "$TEST_ROOT/sep/.worktrees/foo" ]
+}
+
+@test "zg create reads a .git gitfile without a final newline" {
+    git init -q -b main --separate-git-dir "$TEST_ROOT/sepgit" "$TEST_ROOT/sep"
+    cd "$TEST_ROOT/sep"
+    git commit -q --allow-empty -m "chore: init"
+    printf 'gitdir: %s' "$TEST_ROOT/sepgit" >"$TEST_ROOT/sep/.git"
+    run --separate-stderr "$ZG" create foo
+    [ "$status" -eq 0 ]
+    [ -d "$TEST_ROOT/sep/.worktrees/foo" ]
+}
+
 # Moves the git dir into a directory that is itself called .git-like
 # (store/proj/.git) and symlinks it back as the work tree's .git.
 make_nested_dotgit_repo() {
