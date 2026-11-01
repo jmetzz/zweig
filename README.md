@@ -132,7 +132,7 @@ Here are some examples of conversational API usage:
   zg sync all
   ```
 
-- Create a worktree from a pull request number:
+- Create a worktree from a pull request number. The worktree checks out the PR's branch and is named `pr-<N>-<branch>`, with `/` turned into `-` (PR 42 on `feat/login-sso` becomes `.worktrees/pr-42-feat-login-sso`). Running it again switches to the existing worktree:
 
   ```bash
   zg create from-pr 42

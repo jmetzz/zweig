@@ -1176,11 +1176,11 @@ stub_gh() {
     export GH_HEAD=pr-branch
     run with_shim bash 'zg create from-pr 42 >/dev/null 2>&1 || exit 10; pwd -P'
     [ "$status" -eq 0 ]
-    [ "$output" = "$(realdir "$REPO/.worktrees/42")" ]
-    [ "$(git -C "$REPO/.worktrees/42" branch --show-current)" = "pr-branch" ]
+    [ "$output" = "$(realdir "$REPO/.worktrees/pr-42-pr-branch")" ]
+    [ "$(git -C "$REPO/.worktrees/pr-42-pr-branch" branch --show-current)" = "pr-branch" ]
     run with_shim bash 'zg create from_pr 42 >/dev/null || exit 10; pwd -P'
     [ "$status" -eq 0 ]
-    [ "$output" = "$(realdir "$REPO/.worktrees/42")" ]
+    [ "$output" = "$(realdir "$REPO/.worktrees/pr-42-pr-branch")" ]
 }
 
 @test "shim under zsh: zg root, select, main and create from-pr move the shell" {
@@ -1201,7 +1201,7 @@ stub_gh() {
     [ "${lines[0]}" = "$(realdir "$REPO")" ]
     [ "${lines[1]}" = "$(realdir "$TEST_ROOT/elsewhere/outside")" ]
     [ "${lines[2]}" = "$(realdir "$REPO")" ]
-    [ "${lines[3]}" = "$(realdir "$REPO/.worktrees/42")" ]
+    [ "${lines[3]}" = "$(realdir "$REPO/.worktrees/pr-42-pr-branch")" ]
 }
 
 @test "without the shim, moving commands print the path and a shim hint, never 'Switched'" {
@@ -1214,7 +1214,7 @@ stub_gh() {
     cd "$TEST_ROOT/elsewhere/outside"
     # "<command args>|<label it prints>"; args are word-split on purpose.
     for case in "root|Project root" "main|Worktree: main" "switch outside|Worktree: outside" \
-        "select|Worktree: outside" "create from-pr 7|Worktree: 7"; do
+        "select|Worktree: outside" "create from-pr 7|Worktree: pr-7-pr-branch"; do
         # shellcheck disable=SC2086
         run --separate-stderr "$ZG" ${case%%|*}
         [ "$status" -eq 0 ]
@@ -1340,5 +1340,107 @@ STUB
     run with_shim bash 'zg create -s foo >/dev/null 2>&1 || exit 10; pwd -P; zg create from-pr 43 -s >/dev/null 2>&1 || exit 11; pwd -P'
     [ "$status" -eq 0 ]
     [ "${lines[0]}" = "$(realdir "$REPO/.worktrees/foo")" ]
-    [ "${lines[1]}" = "$(realdir "$REPO/.worktrees/43")" ]
+    [ "${lines[1]}" = "$(realdir "$REPO/.worktrees/pr-43-pr-branch")" ]
+}
+
+@test "zg create from-pr names the worktree pr-<N>-<branch>, flattening slashes, on the real branch" {
+    make_repo_with_origin
+    git push -q origin main:feat/login-sso
+    echo "SECRET=1" > .env
+    stub_gh
+    export GH_HEAD=feat/login-sso
+    run "$ZG" create from-pr 42
+    [ "$status" -eq 0 ]
+    [ -d "$REPO/.worktrees/pr-42-feat-login-sso" ]
+    [ ! -e "$REPO/.worktrees/42" ]
+    [ ! -e "$REPO/.worktrees/pr-42-feat" ]
+    [ "$(git -C "$REPO/.worktrees/pr-42-feat-login-sso" branch --show-current)" = "feat/login-sso" ]
+    [ "$(cat "$REPO/.worktrees/pr-42-feat-login-sso/.env")" = "SECRET=1" ]
+    [[ "$output" == *"Path: $(realdir "$REPO")/.worktrees/pr-42-feat-login-sso"* ]]
+    run "$ZG" create from-pr 42
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"already exists"* ]]
+    [[ "$output" == *"Path: $(realdir "$REPO")/.worktrees/pr-42-feat-login-sso"* ]]
+    [ "$(ls "$REPO/.worktrees")" = "pr-42-feat-login-sso" ]
+}
+
+@test "zg create from-pr switches to the PR branch's worktree wherever it is, creating nothing" {
+    make_repo_with_origin
+    git push -q origin main:feat/login-sso
+    git worktree add -q "$TEST_ROOT/elsewhere/sso" -b feat/login-sso
+    # A worktree-dir directory named like the branch, holding another branch,
+    # must not shadow the branch's real worktree.
+    git worktree add -q "$REPO/.worktrees/feat/login-sso" -b decoy
+    stub_gh
+    export GH_HEAD=feat/login-sso
+    run "$ZG" create from-pr 42
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"already checked out"* ]]
+    [[ "$output" == *"Path: $(realdir "$TEST_ROOT/elsewhere/sso")"* ]]
+    [ "$(ls "$REPO/.worktrees")" = "feat" ]
+}
+
+@test "zg create from-pr reuses a worktree from the old <N> naming" {
+    make_repo_with_origin
+    git push -q origin main:pr-branch
+    git worktree add -q "$REPO/.worktrees/42" -b pr-branch
+    stub_gh
+    export GH_HEAD=pr-branch
+    run "$ZG" create from-pr 42
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Path: $(realdir "$REPO")/.worktrees/42"* ]]
+    [ "$(ls "$REPO/.worktrees")" = "42" ]
+}
+
+@test "zg create from-pr finds an existing pr-<N>-* worktree without asking gh" {
+    make_repo
+    git worktree add -q "$REPO/.worktrees/pr-42-renamed" -b renamed
+    git worktree add -q "$REPO/.worktrees/pr-420-other" -b other
+    stub_gh
+    unset GH_HEAD # the stub now fails like an offline gh
+    run "$ZG" create from-pr 42
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"already exists"* ]]
+    [[ "$output" == *"Path: $(realdir "$REPO")/.worktrees/pr-42-renamed"* ]]
+    # pr-4 must not match pr-42-* or pr-420-*: it falls through to gh, which fails.
+    run "$ZG" create from-pr 4
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Could not resolve head branch for PR #4"* ]]
+}
+
+@test "zg create from-pr asks gh which worktree is current when several pr-<N>-* exist" {
+    make_repo
+    git worktree add -q "$REPO/.worktrees/pr-42-old-name" -b old-name
+    git worktree add -q "$TEST_ROOT/elsewhere/new" -b new-name
+    git worktree add -q "$REPO/.worktrees/pr-42-new-name" -b decoy
+    stub_gh
+    export GH_HEAD=new-name
+    run "$ZG" create from-pr 42
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Path: $(realdir "$TEST_ROOT/elsewhere/new")"* ]]
+}
+
+@test "zg switch reaches a from-pr worktree by directory name and by branch" {
+    make_repo_with_origin
+    git push -q origin main:feat/login-sso
+    stub_gh
+    export GH_HEAD=feat/login-sso
+    "$ZG" create from-pr 42 >/dev/null 2>&1
+    for target in pr-42-feat-login-sso feat/login-sso; do
+        run "$ZG" switch "$target"
+        [ "$status" -eq 0 ]
+        [[ "$output" == *"Path: $(realdir "$REPO")/.worktrees/pr-42-feat-login-sso"* ]]
+    done
+}
+
+@test "zg create from-pr rejects a PR ID that isn't a number" {
+    make_repo
+    stub_gh
+    export GH_HEAD=pr-branch
+    for bad in ../x 4/2 abc 0; do
+        run "$ZG" create from-pr "$bad"
+        [ "$status" -eq 1 ]
+        [[ "$output" == *"PR ID must be a number"* ]]
+    done
+    [ ! -e "$REPO/.worktrees" ]
 }
