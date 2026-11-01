@@ -2073,7 +2073,11 @@ make_nested_dotgit_repo() {
 }
 
 # Worktrees with an initialized submodule (#38, deferred): zg keeps git's
-# behaviour. git refuses to remove them without --force, and so does zg.
+# behaviour. git refuses to remove them without --force, and so do remove,
+# finalize and rebuild. These tests record that behaviour, not endorse it:
+# --force deletes the submodule's git dir, so its unpushed commits and stashes
+# are lost. prune trees can't remove them even with --force (its --force only
+# skips the prompt and force-deletes branches).
 
 # Adds a one-commit "sub" repo as a submodule of the current repo, creates
 # worktree $1 (branch $1) outside the repo, and initializes the submodule there.
@@ -2133,6 +2137,7 @@ make_worktree_with_submodule() {
     [[ "$output" == *"cannot be moved or removed"* ]]
     [ -d "$TEST_ROOT/wt-sm/sub" ]
     [[ "$output" != *"Rebuilt"* ]]
+    git show-ref --verify --quiet refs/heads/sm
 }
 
 @test "zg prune trees keeps a gone worktree with an initialized submodule and exits non-zero" {
@@ -2145,4 +2150,23 @@ make_worktree_with_submodule() {
     [[ "$output" == *"cannot be moved or removed"* ]]
     [ -d "$TEST_ROOT/wt-sm/sub" ]
     git show-ref --verify --quiet refs/heads/sm
+}
+
+# remove merged finalizes with --force, which would bypass git's refusal and
+# delete the submodule's git dir, so it must leave these worktrees alone.
+@test "zg remove merged skips a worktree with an initialized submodule and keeps its unpushed commits" {
+    make_repo_with_origin
+    make_worktree_with_submodule sm
+    git push -q origin main   # so sm counts as merged into origin/main
+    git -C "$TEST_ROOT/wt-sm/sub" commit -q --allow-empty -m "chore: unpushed work"
+    local unpushed
+    unpushed="$(git -C "$TEST_ROOT/wt-sm/sub" rev-parse HEAD)"
+    run bash -c 'echo y | "$1" remove merged' _ "$ZG"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Skipping sm: it has an initialized submodule"* ]]
+    [[ "$output" == *"zg remove sm --force"* ]]
+    [[ "$output" == *"removed: 0"* ]]
+    [ -d "$TEST_ROOT/wt-sm/sub" ]
+    git show-ref --verify --quiet refs/heads/sm
+    [ "$(git -C "$TEST_ROOT/wt-sm/sub" rev-parse HEAD)" = "$unpushed" ]
 }
