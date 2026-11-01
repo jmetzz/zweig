@@ -456,21 +456,23 @@ zg_core_finalize() {
     branch="$(zg_helpers_worktree_branch "$dir")" || return 1
   fi
 
-  # Without a worktree there is only a branch to act on: the default branch is
-  # never deleted, and an unknown name has nothing to finalize.
-  local has_branch="false"
-  if [[ -n "$branch" ]] && git show-ref --verify --quiet "refs/heads/$branch"; then
-    has_branch="true"
+  # A branch is deleted only if it exists locally and is not the default branch
+  # (never deleted, not even with --force).
+  local delete_branch="false"
+  if [[ -n "$branch" && "$branch" != "$ZWEIG_DEFAULT_BRANCH" ]] \
+    && git show-ref --verify --quiet "refs/heads/$branch"; then
+    delete_branch="true"
   fi
-  if [[ -z "$dir" ]]; then
+
+  # Without a worktree, finalize can only delete a branch: nothing to do for the
+  # default branch, and an unknown name fails.
+  if [[ -z "$dir" && "$delete_branch" == "false" ]]; then
     if [[ "$branch" == "$ZWEIG_DEFAULT_BRANCH" ]]; then
       echo "ℹ️ Nothing to finalize: the default branch '$branch' is never deleted."
       return 0
     fi
-    if [[ "$has_branch" == "false" ]]; then
-      echo "❌ No worktree or local branch named '$target'" >&2
-      return 1
-    fi
+    echo "❌ No worktree or local branch named '$target'" >&2
+    return 1
   fi
 
   # Protected worktrees, and the default branch wherever it is checked out,
@@ -479,25 +481,20 @@ zg_core_finalize() {
     zg_helpers_guard_protected "$target" "$dir" "$branch" || return 1
   fi
 
-  # The default branch is never deleted, not even with --force.
-  local delete_branch="false"
-  if [[ "$has_branch" == "true" && "$branch" != "$ZWEIG_DEFAULT_BRANCH" ]]; then
-    delete_branch="true"
-  fi
-
-  # Safe confirmation
+  # Safe confirmation, describing what will actually happen. A worktree holding
+  # the default branch never gets here: the guard above requires --force.
   if [[ "$force" == "false" ]]; then
-    local what
+    local action
     if [[ -z "$dir" ]]; then
-      what="delete local branch '$branch' (no worktree)"
+      action="delete local branch '$branch' (no worktree)"
     elif [[ -z "$branch" ]]; then
-      what="remove worktree $dir (detached; no branch to delete)"
+      action="remove worktree $dir (detached; no branch to delete)"
     elif [[ "$delete_branch" == "true" ]]; then
-      what="remove worktree $dir and delete local branch '$branch'"
+      action="remove worktree $dir and delete local branch '$branch'"
     else
-      what="remove worktree $dir (keeps branch '$branch')"
+      action="remove worktree $dir (no local branch '$branch' to delete)"
     fi
-    if ! read -p "Finalize '$target': $what? (y/N): " -n 1 -r; then
+    if ! read -p "Finalize '$target': $action? (y/N): " -n 1 -r; then
       echo; echo "Operation cancelled."; return 1
     fi
     echo
@@ -517,21 +514,24 @@ zg_core_finalize() {
     else
       git worktree remove "$dir" || { echo "❌ Failed to remove worktree: $target" >&2; return 1; }
     fi
-    if [[ "$delete_branch" == "false" ]]; then
-      if [[ -n "$branch" ]]; then
-        echo "✅ Removed worktree '$target'; kept the default branch '$branch'."
-      else
-        echo "✅ Removed detached worktree '$target'."
-      fi
-      return 0
-    fi
   fi
 
-  # Will fail if not merged—fine
-  git branch -d "$branch" || {
-    echo "⚠️ Branch $branch not deleted (not fully merged?)."
-    [[ "$force" == "true" ]] && echo "Hint: use 'git branch -D $branch' to force."
-  }
+  if [[ "$delete_branch" == "true" ]]; then
+    # Fails if not fully merged (a warning, not an error)
+    git branch -d "$branch" || {
+      echo "⚠️ Branch $branch not deleted (not fully merged?)."
+      [[ "$force" == "true" ]] && echo "Hint: use 'git branch -D $branch' to force."
+    }
+  elif [[ -z "$branch" ]]; then
+    echo "✅ Removed detached worktree '$target'."
+    return 0
+  elif [[ "$branch" == "$ZWEIG_DEFAULT_BRANCH" ]]; then
+    echo "✅ Removed worktree '$target'; kept the default branch '$branch'."
+    return 0
+  else
+    echo "✅ Removed worktree '$target'; no local branch '$branch' to delete."
+    return 0
+  fi
 
   echo "✅ Finalized and cleaned up: $target"
 }
