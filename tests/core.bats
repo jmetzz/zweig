@@ -1500,6 +1500,10 @@ STUB
     run --separate-stderr "$ZG" create from-pr 42
     [ "$status" -eq 1 ]
     [[ "$stderr" == *"PR #42: To get started with GitHub CLI"* ]]
+    export GH_ERR=$'error connecting to api.github.com\ncheck your internet connection'
+    run --separate-stderr "$ZG" create from-pr 42
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"PR #42: error connecting to api.github.com check your internet connection"* ]]
     unset GH_ERR
     run --separate-stderr "$ZG" create from-pr 42
     [ "$status" -eq 1 ]
@@ -1519,4 +1523,32 @@ STUB
     [ "$status" -eq 1 ]
     [[ "$stderr" == *"Could not list worktrees to look up branch 'pr-branch'"* ]]
     [ ! -e "$REPO/.worktrees" ]
+}
+
+@test "zg create from-pr asks gh when both an old <N> and a pr-<N>-* worktree exist" {
+    make_repo
+    git worktree add -q "$REPO/.worktrees/42" -b legacy
+    git worktree add -q "$REPO/.worktrees/pr-42-current" -b current
+    stub_gh
+    export GH_HEAD=current
+    run "$ZG" create from-pr 42
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Several worktrees match PR #42"* ]]
+    [[ "$output" == *"Path: $(realdir "$REPO")/.worktrees/pr-42-current"* ]]
+}
+
+@test "zg create from-pr skips stale pr-<N>-* directories and a worktree on a branch named <N>" {
+    make_repo_with_origin
+    git push -q origin main:pr-branch
+    mkdir -p "$REPO/.worktrees/pr-42-stale"
+    echo "gitdir: $TEST_ROOT/removed/gitdir" > "$REPO/.worktrees/pr-42-stale/.git"
+    touch "$REPO/.worktrees/pr-42-file"
+    "$ZG" create 42 >/dev/null 2>&1
+    stub_gh
+    export GH_HEAD=pr-branch
+    run "$ZG" create from-pr 42
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"already exists"* ]]
+    [[ "$output" != *"Several worktrees"* ]]
+    [ "$(git -C "$REPO/.worktrees/pr-42-pr-branch" branch --show-current)" = "pr-branch" ]
 }
