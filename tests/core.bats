@@ -1238,12 +1238,17 @@ stub_gh() {
 }
 
 @test "without the shim, a stray ZG_CD_FILE is left alone; an unwritable handoff file fails" {
+    [ "$(id -u)" -ne 0 ] || skip "root can write a read-only file"
     make_repo
     printf 'keep me\n' > "$TEST_ROOT/notes.txt"
     ZG_CD_FILE="$TEST_ROOT/notes.txt" run --separate-stderr "$ZG" root
     [ "$status" -eq 0 ]
     [ "$(cat "$TEST_ROOT/notes.txt")" = "keep me" ]
     [[ "$stderr" == *"source the shell shim"* ]]
+    # Shaped like the shim's but missing: also ignored.
+    ZG_CD_FILE="$TEST_ROOT/zg-cd.gone" run --separate-stderr "$ZG" root
+    [ "$status" -eq 0 ]
+    [ ! -e "$TEST_ROOT/zg-cd.gone" ]
     : > "$TEST_ROOT/zg-cd.ro"
     chmod 444 "$TEST_ROOT/zg-cd.ro"
     ZG_CD_FILE="$TEST_ROOT/zg-cd.ro" run --separate-stderr "$ZG" root
@@ -1291,9 +1296,12 @@ STUB
     [ "$status" -eq 0 ]
     local here; here="$(realdir "$TEST_ROOT/here")"
     [[ "$output" == *"zg: not changing directory (zg exited 3)"* ]]
-    [ "${lines[1]}" = "rc=3" ] && [ "${lines[2]}" = "$here" ]
-    [ "${lines[3]}" = "rc=1" ] && [ "${lines[4]}" = "$here" ]
-    [ "${lines[5]}" = "rc=0" ] && [ "${lines[6]}" = "$here" ]
+    [ "${lines[1]}" = "rc=3" ]
+    [ "${lines[2]}" = "$here" ]
+    [ "${lines[3]}" = "rc=1" ]
+    [ "${lines[4]}" = "$here" ]
+    [ "${lines[5]}" = "rc=0" ]
+    [ "${lines[6]}" = "$here" ]
 }
 
 @test "shim: reuses one emptied handoff file per shell, and runs zg without one if mktemp fails" {
@@ -1301,11 +1309,20 @@ STUB
     git worktree add -q -b ext "$TEST_ROOT/elsewhere/ext"
     cd "$TEST_ROOT/elsewhere/ext"
     export TMPDIR="$TEST_ROOT/tmp"; mkdir -p "$TMPDIR"
-    run with_shim bash 'zg root >/dev/null && zg switch ext >/dev/null && zg main >/dev/null && zg list >/dev/null; pwd -P'
+    # A tmp cleaner removing the file between runs gets it recreated.
+    run with_shim bash '
+        zg root >/dev/null || exit 10
+        zg switch ext >/dev/null || exit 11
+        rm -f "$__ZG_CD_FILE"
+        zg main >/dev/null || exit 12
+        zg list >/dev/null || exit 13
+        pwd -P'
     [ "$status" -eq 0 ]
     [ "$output" = "$(realdir "$REPO")" ]
     run find "$TMPDIR" -type f
-    [ "${#lines[@]}" -eq 1 ] && [[ "${lines[0]}" == */zg-cd.* ]] && [ ! -s "${lines[0]}" ]
+    [ "${#lines[@]}" -eq 1 ]
+    [[ "${lines[0]}" == */zg-cd.* ]]
+    [ ! -s "${lines[0]}" ]
     # The temp dir is gone: zg still runs and prints the path instead of moving.
     TMPDIR="$TEST_ROOT/nope" run --separate-stderr with_shim bash 'zg list && zg root; echo "rc=$?"; pwd -P'
     [ "$status" -eq 0 ]
