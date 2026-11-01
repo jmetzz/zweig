@@ -773,7 +773,7 @@ STUB
     stub_fzf
     FZF_PICK="(detached:" run "$ZG" select
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Switched to worktree: (detached: "* ]]
+    [[ "$output" == *"Worktree: (detached: "* ]]
     [[ "$output" == *"Path: "*"/else where/loose" ]]
 }
 
@@ -1125,4 +1125,115 @@ col_of() { local prefix="${1%%"$2"*}"; echo "${#prefix}"; }
     [[ "$stderr" != *"No such file or directory"* ]]
     [ -d "$REPO/.worktrees/bar" ]
     [ ! -e "$HOME/.worktrees" ]
+}
+
+# Runs a script in a fresh <shell> with bin/ on PATH and the shim sourced.
+with_shim() {
+    local shell="$1" script="$2"
+    "$shell" -c 'PATH="$1/../bin:$PATH"; source "$1/../shims/shims.sh"; '"$script" _ "$BATS_TEST_DIRNAME"
+}
+
+@test "shim: zg root moves the shell from a linked worktree to the project root" {
+    make_repo
+    git worktree add -q -b ext "$TEST_ROOT/elsewhere/ext"
+    cd "$TEST_ROOT/elsewhere/ext"
+    run with_shim bash 'zg root >/dev/null || exit 10; pwd -P'
+    [ "$status" -eq 0 ]
+    [ "$output" = "$(realdir "$REPO")" ]
+}
+
+@test "shim: zg main moves the shell to the worktree holding the default branch" {
+    make_repo
+    git worktree add -q -b ext "$TEST_ROOT/elsewhere/ext"
+    cd "$TEST_ROOT/elsewhere/ext"
+    run with_shim bash 'zg main >/dev/null || exit 10; pwd -P'
+    [ "$status" -eq 0 ]
+    [ "$output" = "$(realdir "$REPO")" ]
+}
+
+@test "shim: zg select moves the shell to the picked worktree" {
+    make_repo
+    git worktree add -q -b outside "$TEST_ROOT/else where/outside"
+    stub_fzf
+    run with_shim bash 'FZF_PICK=outside zg select >/dev/null || exit 10; pwd -P'
+    [ "$status" -eq 0 ]
+    [ "$output" = "$(realdir "$TEST_ROOT/else where/outside")" ]
+}
+
+# Stubs gh so `gh pr view <N> --json headRefName -q .headRefName` prints $GH_HEAD.
+stub_gh() {
+    mkdir -p "$TEST_ROOT/bin"
+    printf '#!/bin/sh\n[ -n "${GH_HEAD:-}" ] || exit 1\nprintf "%%s\\n" "$GH_HEAD"\n' > "$TEST_ROOT/bin/gh"
+    chmod +x "$TEST_ROOT/bin/gh"
+    export PATH="$TEST_ROOT/bin:$PATH"
+}
+
+@test "shim: zg create from-pr moves the shell into the new worktree, and again when it exists" {
+    make_repo_with_origin
+    git push -q origin main:pr-branch
+    stub_gh
+    export GH_HEAD=pr-branch
+    run with_shim bash 'zg create from-pr 42 >/dev/null 2>&1 || exit 10; pwd -P'
+    [ "$status" -eq 0 ]
+    [ "$output" = "$(realdir "$REPO/.worktrees/42")" ]
+    [ "$(git -C "$REPO/.worktrees/42" branch --show-current)" = "pr-branch" ]
+    run with_shim bash 'zg create from_pr 42 >/dev/null || exit 10; pwd -P'
+    [ "$status" -eq 0 ]
+    [ "$output" = "$(realdir "$REPO/.worktrees/42")" ]
+}
+
+@test "shim under zsh: zg root, select, main and create from-pr move the shell" {
+    command -v zsh >/dev/null || skip "zsh not installed"
+    make_repo_with_origin
+    git push -q origin main:pr-branch
+    git worktree add -q -b outside "$TEST_ROOT/elsewhere/outside"
+    stub_fzf
+    stub_gh
+    export GH_HEAD=pr-branch
+    cd "$TEST_ROOT/elsewhere/outside"
+    run with_shim zsh '
+        zg root >/dev/null || exit 10; pwd -P
+        FZF_PICK=outside zg select >/dev/null || exit 11; pwd -P
+        zg main >/dev/null || exit 12; pwd -P
+        zg create from-pr 42 >/dev/null 2>&1 || exit 13; pwd -P'
+    [ "$status" -eq 0 ]
+    [ "${lines[0]}" = "$(realdir "$REPO")" ]
+    [ "${lines[1]}" = "$(realdir "$TEST_ROOT/elsewhere/outside")" ]
+    [ "${lines[2]}" = "$(realdir "$REPO")" ]
+    [ "${lines[3]}" = "$(realdir "$REPO/.worktrees/42")" ]
+}
+
+@test "without the shim, moving commands print the path and a shim hint, never 'Switched'" {
+    make_repo_with_origin
+    git push -q origin main:pr-branch
+    git worktree add -q -b outside "$TEST_ROOT/elsewhere/outside"
+    stub_fzf
+    stub_gh
+    export GH_HEAD=pr-branch FZF_PICK=outside
+    cd "$TEST_ROOT/elsewhere/outside"
+    for args in root main "switch outside" select "create from-pr 7"; do
+        # shellcheck disable=SC2086
+        run --separate-stderr "$ZG" $args
+        [ "$status" -eq 0 ]
+        [[ "$output" != *"Switched"* ]]
+        [[ "$output" == *"   Path: /"* ]]
+        [[ "$stderr" == *"source the shell shim: . "*"/shims/shims.sh"* ]]
+        [ "$(pwd -P)" = "$(realdir "$TEST_ROOT/elsewhere/outside")" ]
+    done
+}
+
+@test "shim: a failed or cancelled move leaves the shell where it was" {
+    make_repo
+    git worktree add -q -b outside "$TEST_ROOT/elsewhere/outside"
+    stub_fzf
+    cd "$TEST_ROOT/elsewhere/outside"
+    # Cancelled select (fzf exits 130) succeeds without moving; a missing default
+    # branch fails without moving; neither leaves a handoff file behind.
+    export TMPDIR="$TEST_ROOT/tmp"; mkdir -p "$TMPDIR"
+    run with_shim bash 'zg select >/dev/null || exit 10; pwd -P; ZWEIG_DEFAULT_BRANCH=nope zg main >/dev/null 2>&1; echo "rc=$?"; pwd -P'
+    [ "$status" -eq 0 ]
+    [ "${lines[0]}" = "$(realdir "$TEST_ROOT/elsewhere/outside")" ]
+    [ "${lines[1]}" = "rc=1" ]
+    [ "${lines[2]}" = "$(realdir "$TEST_ROOT/elsewhere/outside")" ]
+    [ -z "$(ls -A "$TMPDIR")" ]
 }

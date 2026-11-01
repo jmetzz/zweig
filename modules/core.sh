@@ -17,8 +17,7 @@ zg_core_main() {
 zg_core_root() {
     local root_dir
     root_dir="$(zg__control_root)" || root_dir="$(git rev-parse --show-toplevel)"
-    cd "$root_dir" || return
-    echo "📂 Switched to project root: $root_dir"
+    zg_helpers_request_cd "$root_dir" "project root"
 }
 
 # --- List all worktrees ---
@@ -194,9 +193,7 @@ zg_core_switch() {
         return 1
     fi
 
-    cd "$dir" || return
-    echo "📂 Switched to worktree: $target"
-    echo "   Path: $dir"
+    zg_helpers_request_cd "$dir" "worktree: $target"
 }
 
 # Resolve worktree directory from name or branch (prints path)

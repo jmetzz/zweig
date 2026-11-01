@@ -354,6 +354,24 @@ zg_helpers_worktree_branch() {
     printf '%s\n' "$branch"
 }
 
+# --- Move the caller's shell to a directory (through the shell shim) ---
+# zg runs as a subprocess, so it can't change its caller's directory. The shim
+# (shims/shims.sh) exports ZG_CD_FILE, a file it cd's to once zg exits; write
+# the target there. Without the shim, print the path and how to enable it
+# instead of claiming a switch that didn't happen.
+# Usage: zg_helpers_request_cd <dir> <what>   e.g. "worktree: foo", "project root"
+zg_helpers_request_cd() {
+    local dir="$1" what="$2"
+    if [[ -n "${ZG_CD_FILE:-}" ]]; then
+        printf '%s\n' "$dir" > "$ZG_CD_FILE" || return 1
+        echo "📂 Switched to $what"
+    else
+        echo "📂 ${what^}"
+        echo "💡 To switch automatically, source the shell shim: . \"$ZWEIG_ROOT/shims/shims.sh\"" >&2
+    fi
+    echo "   Path: $dir"
+}
+
 # --- True if the current directory is the given directory or inside it ---
 # Compares physical paths, so symlinked prefixes (macOS /var) can't hide a match.
 # A directory that doesn't exist counts as "not inside".
@@ -471,7 +489,11 @@ Meta:
 Extensions:
   zg select                         Fuzzy switch to any worktree of the repo, with a git log
                                      preview (requires fzf).
-  zg create from-pr <pr-id>         Create worktree from GitHub PR (requires gh).
+  zg create from-pr <pr-id>         Create worktree from GitHub PR (requires gh) and switch to it.
+
+Commands that move you (switch/cd, main, root, select, create -s, create from-pr)
+change your shell's directory only with the shell shim sourced; without it they
+print the target path instead:  . "$ZWEIG_ROOT/shims/shims.sh"
 
 EOF
 }
