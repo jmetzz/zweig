@@ -353,14 +353,64 @@ realdir() { (cd "$1" && pwd -P); }
     git show-ref --verify --quiet refs/heads/foo
 }
 
-@test "zg finalize refuses a directory holding the default branch without --force" {
+# The default branch checked out in a linked worktree whose directory name
+# differs from the branch, so a guard on the typed name alone would miss it.
+make_default_branch_worktree() {
     make_repo
     git checkout -q -b dev
-    git worktree add -q "$REPO/.worktrees/trunk" main
-    run bash -c 'echo y | "$1" finalize trunk' _ "$ZG"
+    git worktree add -q "$REPO/.worktrees/other" main
+}
+
+@test "zg finalize refuses a directory holding the default branch without --force" {
+    make_default_branch_worktree
+    run bash -c 'echo y | "$1" finalize other' _ "$ZG"
     [ "$status" -ne 0 ]
-    [[ "$output" == *"'trunk' holds the default branch 'main'"* ]]
-    [ -d "$REPO/.worktrees/trunk" ]
+    [[ "$output" == *"'other' holds the default branch 'main'"* ]]
+    [ -d "$REPO/.worktrees/other" ]
+}
+
+@test "zg remove refuses a directory holding the default branch without --force" {
+    make_default_branch_worktree
+    run bash -c 'echo y | "$1" remove other' _ "$ZG"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"'other' holds the default branch 'main'"* ]]
+    [[ "$output" != *"Remove worktree"* ]]
+    [ -d "$REPO/.worktrees/other" ]
+}
+
+@test "zg rebuild refuses a directory holding the default branch without --force" {
+    make_default_branch_worktree
+    run bash -c 'echo y | "$1" rebuild other' _ "$ZG"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"'other' holds the default branch 'main'"* ]]
+    [ -d "$REPO/.worktrees/other" ]
+}
+
+@test "zg remove --force removes a directory holding the default branch but keeps the branch" {
+    make_default_branch_worktree
+    run "$ZG" remove other --force
+    [ "$status" -eq 0 ]
+    [ ! -e "$REPO/.worktrees/other" ]
+    git show-ref --verify --quiet refs/heads/main
+}
+
+# dev is created from main, so main is fully merged and `git branch -d` would
+# delete it.
+@test "zg finalize --force removes a directory holding the default branch but never deletes the branch" {
+    make_default_branch_worktree
+    run "$ZG" finalize other --force
+    [ "$status" -eq 0 ]
+    [ ! -e "$REPO/.worktrees/other" ]
+    git show-ref --verify --quiet refs/heads/main
+}
+
+@test "zg finalize --force never deletes the default branch named directly" {
+    make_repo
+    git checkout -q -b dev
+    run "$ZG" finalize main --force
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Kept the default branch 'main'"* ]]
+    git show-ref --verify --quiet refs/heads/main
 }
 
 @test "zg protect and unprotect report an unknown worktree on stderr" {
@@ -434,6 +484,19 @@ make_repo_with_origin() {
     [ -d "$REPO/.worktrees/kept" ]
     ! git show-ref --verify --quiet refs/heads/ext
     ! git show-ref --verify --quiet refs/heads/foo
+}
+
+@test "zg prune trees --force never deletes the default branch even when its remote is gone" {
+    make_repo_with_origin
+    git checkout -q -b dev
+    git worktree add -q "$REPO/.worktrees/other" main
+    git push -q origin dev
+    git --git-dir="$TEST_ROOT/origin.git" symbolic-ref HEAD refs/heads/dev
+    git push -q origin --delete main
+    run "$ZG" prune trees --force
+    [ "$status" -eq 0 ]
+    [ -d "$REPO/.worktrees/other" ]
+    git show-ref --verify --quiet refs/heads/main
 }
 
 @test "zg prune trees skips a protected outside worktree" {

@@ -423,6 +423,24 @@ zg_helpers_dir_is_protected() {
     [[ -n "$dir" && -f "$dir/.protected" ]]
 }
 
+# --- Guard for remove/finalize without --force ---
+# Takes the name the user typed, the resolved worktree directory (empty if
+# there is none) and the branch checked out there. Fails, with the reason on
+# stderr, when the worktree is protected or holds the default branch. The
+# branch is checked as well as the name, so the guard holds whichever name the
+# worktree was addressed by.
+zg_helpers_guard_protected() {
+    local name="$1" dir="$2" branch="$3"
+    if zg_helpers_dir_is_protected "$name" "$dir"; then
+        echo "❌ '$name' is protected. Use --force to override." >&2
+        return 1
+    fi
+    if [[ "$branch" == "$ZWEIG_DEFAULT_BRANCH" ]]; then
+        echo "❌ '$name' holds the default branch '$branch'. Use --force to override." >&2
+        return 1
+    fi
+}
+
 # --- Seed a newly created worktree with local, usually-gitignored context files ---
 # Copies each entry in ZWEIG_COPY_ON_CREATE (space-separated, relative to the repo
 # root) from the control repo root into the new worktree, when present in the
@@ -486,6 +504,7 @@ Worktree Core Lifecycle:
                                      Finds worktrees anywhere on disk; detached ones
                                      only by their directory name under the worktree dir.
   zg finalize <branch>              Final cleanup after merge (removes worktree and branch).
+                                     The default branch is never deleted, even with --force.
   zg rebuild <worktree>             Rebuild a worktree (removes and re-adds).
   zg protect <worktree>             Protect a worktree from accidental deletion.
   zg unprotect <worktree>           Remove protection marker from a worktree.
