@@ -270,7 +270,7 @@ zg_core_remove() {
         echo
         if [[ ! "$REPLY" =~ ^[Yy]$ ]]; then
             echo "Operation cancelled."
-            return 0
+            return 1
         fi
     fi
 
@@ -307,7 +307,7 @@ zg_core_remove_merged() {
             echo; echo "Operation cancelled."; return 1
         fi
         echo
-        [[ "$REPLY" =~ ^[Yy]$ ]] || { echo "Operation cancelled."; return 0; }
+        [[ "$REPLY" =~ ^[Yy]$ ]] || { echo "Operation cancelled."; return 1; }
     fi
 
     # Fresh remote info
@@ -402,10 +402,6 @@ zg_core_rebuild() {
     else
         zg_core_remove "$wtree" || return $?
     fi
-    # remove also returns 0 when its prompt is declined, so a worktree that is
-    # still there is the only sign that nothing was removed.
-    [[ -d "$dir" ]] && return 0
-
     local root_dir
     root_dir="$(zg__control_root)" || root_dir="$(git rev-parse --show-toplevel)"
     git worktree add "$dir" "$branch" || {
@@ -459,7 +455,7 @@ zg_core_finalize() {
       echo; echo "Operation cancelled."; return 1
     fi
     echo
-    [[ "$REPLY" =~ ^[Yy]$ ]] || { echo "Operation cancelled."; return 0; }
+    [[ "$REPLY" =~ ^[Yy]$ ]] || { echo "Operation cancelled."; return 1; }
   fi
 
   # Fresh remote info (optional but helpful)
