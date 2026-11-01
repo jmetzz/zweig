@@ -467,9 +467,18 @@ make_default_branch_worktree() {
 }
 
 # read -p only shows its prompt on a terminal: run finalize under a pty and
-# decline, so the prompt text lands in $output.
-run_finalize_declining() {
-    run bash -c '(sleep 1; printf n) | script -q /dev/null bash -c "stty cols 1000; exec \"\$0\" finalize \"\$1\"" "$1" "$2"' _ "$ZG" "$1"
+# answer "n", so the prompt text lands in $output (stderr merged) and a command
+# that wrongly prompts would show "(y/N)" and "Operation cancelled.". The pty is
+# widened so long paths do not wrap. util-linux script takes the command as a
+# string and needs -e for the child's exit status; BSD script takes it as args.
+run_finalize_pty() {
+    local inner
+    inner="stty cols 1000; exec $(printf '%q finalize %q' "$ZG" "$1")"
+    if script --version >/dev/null 2>&1; then
+        run bash -c 'printf n | script -qec "$1" /dev/null' _ "bash -c $(printf '%q' "$inner")"
+    else
+        run bash -c 'printf n | script -q /dev/null bash -c "$1"' _ "$inner"
+    fi
 }
 
 @test "zg finalize --force of the default branch needs no reachable origin" {
@@ -485,34 +494,39 @@ run_finalize_declining() {
     make_repo_with_origin
     git checkout -q -b dev
     git remote set-url origin "$TEST_ROOT/missing"
-    run bash -c '"$1" finalize main </dev/null' _ "$ZG"
+    run_finalize_pty main
     [ "$status" -eq 0 ]
     [[ "$output" == *"Nothing to finalize: the default branch 'main' is never deleted"* ]]
     [[ "$output" != *"y/N"* ]]
+    git show-ref --verify --quiet refs/heads/main
 }
 
 @test "zg finalize prompt names a worktree and its branch" {
     make_repo
     git worktree add -q "$TEST_ROOT/elsewhere/ext" -b ext-branch
-    run_finalize_declining ext-branch
+    run_finalize_pty ext-branch
     [ "$status" -eq 1 ]
     [[ "$output" == *"remove worktree "*"/elsewhere/ext and delete local branch 'ext-branch'"* ]]
+    [ -d "$TEST_ROOT/elsewhere/ext" ]
+    git show-ref --verify --quiet refs/heads/ext-branch
 }
 
 @test "zg finalize prompt for a detached worktree says there is no branch to delete" {
     make_repo
     git worktree add -q --detach "$REPO/.worktrees/det"
-    run_finalize_declining det
+    run_finalize_pty det
     [ "$status" -eq 1 ]
     [[ "$output" == *"remove worktree "*"/.worktrees/det (detached; no branch to delete)"* ]]
+    [ -d "$REPO/.worktrees/det" ]
 }
 
 @test "zg finalize prompt for a branch without a worktree says there is no worktree" {
     make_repo
     git branch lonely
-    run_finalize_declining lonely
+    run_finalize_pty lonely
     [ "$status" -eq 1 ]
     [[ "$output" == *"delete local branch 'lonely' (no worktree)"* ]]
+    git show-ref --verify --quiet refs/heads/lonely
 }
 
 @test "zg finalize --force of a detached worktree needs no reachable origin" {
@@ -524,14 +538,65 @@ run_finalize_declining() {
     [ ! -e "$REPO/.worktrees/det" ]
 }
 
+@test "zg finalize --force of a worktree holding the default branch needs no reachable origin" {
+    make_repo_with_origin
+    git checkout -q -b dev
+    git worktree add -q "$REPO/.worktrees/other" main
+    git remote set-url origin "$TEST_ROOT/missing"
+    run "$ZG" finalize other --force
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"Failed to fetch"* ]]
+    [ ! -e "$REPO/.worktrees/other" ]
+    git show-ref --verify --quiet refs/heads/main
+}
+
+# The fetch runs before anything is removed, so a failed fetch changes nothing.
+@test "zg finalize --force with unreachable origin fails before removing worktree or branch" {
+    make_repo_with_origin
+    git worktree add -q -b feat "$REPO/.worktrees/feat"
+    git remote set-url origin "$TEST_ROOT/missing"
+    run --separate-stderr "$ZG" finalize feat --force
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"Failed to fetch from origin"* ]]
+    [ -d "$REPO/.worktrees/feat" ]
+    git show-ref --verify --quiet refs/heads/feat
+}
+
+@test "zg finalize --force of a worktree on an unborn branch says there is no branch to delete" {
+    make_repo
+    if ! git worktree add -q --orphan -b orph "$REPO/.worktrees/orph" 2>/dev/null; then
+        skip "git worktree add --orphan needs git >= 2.42"
+    fi
+    run "$ZG" finalize orph --force
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"no local branch 'orph' to delete"* ]]
+    [[ "$output" != *"default branch"* ]]
+    [ ! -e "$REPO/.worktrees/orph" ]
+}
+
+@test "zg finalize prompt for a worktree on an unborn branch says there is no branch to delete" {
+    make_repo
+    if ! git worktree add -q --orphan -b orph "$REPO/.worktrees/orph" 2>/dev/null; then
+        skip "git worktree add --orphan needs git >= 2.42"
+    fi
+    run_finalize_pty orph
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"(no local branch 'orph' to delete)"* ]]
+    [ -d "$REPO/.worktrees/orph" ]
+}
+
 @test "zg finalize of an unknown name fails without prompting or fetching" {
     make_repo_with_origin
     git remote set-url origin "$TEST_ROOT/missing"
-    run bash -c '"$1" finalize nosuch </dev/null' _ "$ZG"
+    run_finalize_pty nosuch
     [ "$status" -eq 1 ]
     [[ "$output" == *"No worktree or local branch named 'nosuch'"* ]]
     [[ "$output" != *"y/N"* ]]
     [[ "$output" != *"Failed to fetch"* ]]
+    run --separate-stderr "$ZG" finalize nosuch
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"No worktree or local branch named 'nosuch'"* ]]
+    git show-ref --verify --quiet refs/heads/main
 }
 
 @test "zg protect and unprotect report an unknown worktree on stderr" {
