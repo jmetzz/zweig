@@ -2170,3 +2170,18 @@ make_worktree_with_submodule() {
     git show-ref --verify --quiet refs/heads/sm
     [ "$(git -C "$TEST_ROOT/wt-sm/sub" rev-parse HEAD)" = "$unpushed" ]
 }
+
+@test "zg remove merged skips a worktree whose submodules git can't read" {
+    make_repo_with_origin
+    make_worktree_with_submodule sm
+    git push -q origin main   # so sm counts as merged into origin/main
+    # A damaged submodule git dir: git submodule status fails, while the
+    # superproject still looks clean to the busy check.
+    rm "$(git -C "$TEST_ROOT/wt-sm/sub" rev-parse --absolute-git-dir)/HEAD"
+    run bash -c 'echo y | "$1" remove merged' _ "$ZG"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Skipping sm: git can't read its submodules"* ]]
+    [[ "$output" == *"removed: 0"* ]]
+    [ -d "$TEST_ROOT/wt-sm/sub" ]
+    git show-ref --verify --quiet refs/heads/sm
+}
