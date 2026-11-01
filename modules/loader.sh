@@ -56,6 +56,9 @@ zg__dot_git_target() {
 # picks that directory's parent.
 # Returns ZG_ROOT_NOT_IN_TREE outside a work tree, ZG_ROOT_UNKNOWN when none of
 # the above finds a root. It never guesses.
+# Callers fall back to `git rev-parse --show-toplevel` when this fails. The
+# dispatcher refuses ZG_ROOT_UNKNOWN unless ZWEIG_WORKTREE_DIR is set, so that
+# fallback only applies then: files are seeded from the current work tree.
 zg__control_root() {
   local common_dir git_dir top_raw work_top dir
   common_dir="$(git rev-parse --git-common-dir 2>/dev/null)" || return "$ZG_ROOT_NOT_IN_TREE"
@@ -94,13 +97,12 @@ zg__control_root() {
 }
 
 # --- Worktree directory: repo-local by default, override wins, $HOME as last resort ---
-# The root is resolved once here; the dispatcher reuses the result while the
-# working directory is unchanged (a sourced loader can outlive a `cd`).
+# The root is resolved once here and the dispatcher reuses the result: bin/zg
+# sources the loader in a new process for every command.
 _zg_wt_dir_explicit=0
 [[ -z "${ZWEIG_WORKTREE_DIR:-}" ]] || _zg_wt_dir_explicit=1
 _zg_root_rc=0
 _zg_control_root="$(zg__control_root)" || _zg_root_rc=$?
-_zg_root_pwd="$PWD"
 if ((_zg_wt_dir_explicit)); then
   : # explicit override wins
 elif ((_zg_root_rc == 0)); then
@@ -183,17 +185,10 @@ zg() {
          echo "❌ Not inside a Git repository"; return 1
        fi
        # Refuse rather than put worktrees in a wrong place. Not needed with an
-       # explicit ZWEIG_WORKTREE_DIR. ZG_ROOT_NOT_IN_TREE (a bare repo's git
-       # dir) is left to each command, which falls back to its own top level.
+       # explicit ZWEIG_WORKTREE_DIR. ZG_ROOT_NOT_IN_TREE (e.g. inside a bare
+       # repo's git dir) isn't refused here; each command handles it, or fails.
        if ((! _zg_wt_dir_explicit)); then
-         local root_rc
-         if [[ "$_zg_root_pwd" == "$PWD" ]]; then
-           root_rc="$_zg_root_rc"
-         else
-           root_rc=0
-           zg__control_root >/dev/null || root_rc=$?
-         fi
-         if ((root_rc == ZG_ROOT_UNKNOWN)); then
+         if ((_zg_root_rc == ZG_ROOT_UNKNOWN)); then
            echo "❌ Cannot determine the repository root." >&2
            echo "   git dir:   $(git rev-parse --git-common-dir 2>/dev/null)" >&2
            echo "   work tree: $(git rev-parse --show-toplevel 2>/dev/null)" >&2
