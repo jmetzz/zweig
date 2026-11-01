@@ -366,11 +366,12 @@ zg_helpers_shim_path() {
 # zg runs as a subprocess, so it can't change its caller's directory. The shim
 # (shims/shims.sh) sets ZG_CD_FILE in zg's environment to a zg-cd.* temp file;
 # write the target there as one line, and the shim cd's to it once zg exits
-# successfully. A ZG_CD_FILE not shaped like the shim's is ignored rather than
-# overwritten. Without the shim, print the path and how to enable it instead of
+# successfully. A ZG_CD_FILE that isn't an existing zg-cd.* file (the name
+# shims/shims.sh uses; keep in sync) is ignored rather than overwritten, and
+# treated as no shim. Without the shim, print the path and how to enable it instead of
 # claiming a switch that didn't happen.
 # Usage: zg_helpers_request_cd <dir> <what>   e.g. "worktree: foo", "project root"
-# (<what> is printed capitalised when there is no shim: "Worktree: foo").
+# (<what> is printed capitalised when the handoff isn't used: "Worktree: foo").
 zg_helpers_request_cd() {
     local dir="$1" what="$2" handoff="${ZG_CD_FILE:-}"
     [[ "${handoff##*/}" == zg-cd.* && -f "$handoff" ]] || handoff=""

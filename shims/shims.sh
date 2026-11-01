@@ -8,7 +8,9 @@
 # zg's environment only; we cd there after a successful run. One file per shell
 # session, created here so subshells share it, recreated if a tmp cleaner
 # removed it, and emptied around every run so a path left by an interrupted or
-# failed run never moves you later.
+# failed run never moves you later. Overlapping runs (zg ... &) share it, so
+# only the foreground one should be a command that moves you. The zg-cd.
+# name prefix is checked by zg_helpers_request_cd; keep the two in sync.
 __ZG_CD_FILE="$(mktemp "${TMPDIR:-/tmp}/zg-cd.XXXXXX" 2>/dev/null)" || __ZG_CD_FILE=""
 
 __zg_run_with_cd() {
@@ -17,13 +19,14 @@ __zg_run_with_cd() {
     __ZG_CD_FILE="$(mktemp "${TMPDIR:-/tmp}/zg-cd.XXXXXX" 2>/dev/null)" || __ZG_CD_FILE=""
   fi
   if [[ -z "$__ZG_CD_FILE" ]] || ! : 2>/dev/null > "$__ZG_CD_FILE"; then
-    # No usable temp file: still run zg; commands that move you print the path.
+    # Degraded mode, no usable temp file: still run zg; commands that move you
+    # print the path (and the "source the shim" hint) instead.
     command zg "$@"
     return
   fi
   ZG_CD_FILE="$__ZG_CD_FILE" command zg "$@" || rc=$?
-  IFS= read -r dir < "$__ZG_CD_FILE" || true
-  : > "$__ZG_CD_FILE"
+  IFS= read -r dir 2>/dev/null < "$__ZG_CD_FILE" || true
+  : 2>/dev/null > "$__ZG_CD_FILE"
   if [[ -n "$dir" ]]; then
     if [[ $rc -ne 0 ]]; then
       echo "zg: not changing directory (zg exited $rc)" >&2
