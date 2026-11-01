@@ -496,6 +496,8 @@ Maintenance:
   zg prune metadata                 Prune broken worktree metadata.
   zg prune trees                    Prune worktrees for deleted remote branches, covering
                                      every worktree of the repo, wherever it lives on disk.
+                                     Only branches whose upstream on origin is gone count;
+                                     never-pushed branches are kept. Requires an origin remote.
   zg migrate                        Migrate existing branches to worktrees, skipping branches
                                      already checked out in any worktree.
 
