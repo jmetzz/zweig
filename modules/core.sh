@@ -242,9 +242,10 @@ zg_core_remove() {
         return 1
     fi
 
-    if zg_helpers_is_protected "$wtree" && [[ "$force" == "false" ]]; then
-        echo "❌ Error: Worktree '$wtree' is protected. Use --force to override."
-        return 1
+    if [[ "$force" == "false" ]]; then
+        local branch
+        branch="$(zg_helpers_worktree_branch "$dir")" || return 1
+        zg_helpers_guard_protected "$wtree" "$dir" "$branch" || return 1
     fi
 
     # Warn if dirty when not forced
@@ -446,14 +447,7 @@ zg_core_finalize() {
   # Protected worktrees, and the default branch wherever it is checked out,
   # require --force
   if [[ "$force" == "false" ]]; then
-    if zg_helpers_is_protected "$target"; then
-      echo "❌ '$target' is protected. Use --force to override." >&2
-      return 1
-    fi
-    if [[ "$branch" == "$ZWEIG_DEFAULT_BRANCH" ]]; then
-      echo "❌ '$target' holds the default branch '$branch'. Use --force to override." >&2
-      return 1
-    fi
+    zg_helpers_guard_protected "$target" "$dir" "$branch" || return 1
   fi
 
   # Safe confirmation
@@ -477,8 +471,11 @@ zg_core_finalize() {
     fi
   fi
 
-  # Delete local branch if present (will fail if not merged—fine)
-  if [[ -n "$branch" ]] && git show-ref --verify --quiet "refs/heads/$branch"; then
+  # Delete local branch if present (will fail if not merged—fine). The default
+  # branch is never deleted, not even with --force.
+  if [[ "$branch" == "$ZWEIG_DEFAULT_BRANCH" ]]; then
+    echo "ℹ️ Kept the default branch '$branch'."
+  elif [[ -n "$branch" ]] && git show-ref --verify --quiet "refs/heads/$branch"; then
     git branch -d "$branch" || {
       echo "⚠️ Branch $branch not deleted (not fully merged?)."
       [[ "$force" == "true" ]] && echo "Hint: use 'git branch -D $branch' to force."
