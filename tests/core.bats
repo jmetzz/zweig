@@ -321,8 +321,20 @@ realdir() { (cd "$1" && pwd -P); }
     touch "$TEST_ROOT/elsewhere/ext/stale-file"
     run bash -c 'echo n | "$1" rebuild ext-branch' _ "$ZG"
     [ "$status" -eq 1 ]
+    [[ "$output" == *"Operation cancelled."* ]]
     [[ "$output" != *"Rebuilt"* ]]
     [ -e "$TEST_ROOT/elsewhere/ext/stale-file" ]
+    git worktree list --porcelain | grep -qx "worktree $(cd "$TEST_ROOT/elsewhere/ext" && pwd -P)"
+    git show-ref --verify --quiet refs/heads/ext-branch
+}
+
+@test "zg rebuild recreates the worktree and exits 0 when the prompt is accepted" {
+    make_repo
+    git worktree add -q "$TEST_ROOT/elsewhere/ext" -b ext-branch
+    run bash -c 'echo y | "$1" rebuild ext-branch' _ "$ZG"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Rebuilt"* ]]
+    [ "$(git -C "$TEST_ROOT/elsewhere/ext" branch --show-current)" = "ext-branch" ]
 }
 
 @test "zg rebuild refuses a protected outside worktree without --force" {
@@ -1809,4 +1821,43 @@ STUB
     [[ "$output" == *"Operation cancelled."* ]]
     [ -d "$TEST_ROOT/elsewhere/ext" ]
     git show-ref --verify --quiet refs/heads/ext-branch
+}
+
+# With no input to answer the prompt (cron, CI), each command cancels like a decline.
+@test "zg remove cancels with exit 1 when there is no input for the prompt" {
+    make_repo
+    git worktree add -q "$TEST_ROOT/elsewhere/ext" -b ext-branch
+    run bash -c '"$1" remove ext-branch </dev/null' _ "$ZG"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Operation cancelled."* ]]
+    [ -d "$TEST_ROOT/elsewhere/ext" ]
+}
+
+@test "zg remove merged cancels with exit 1 when there is no input for the prompt" {
+    make_repo_with_origin
+    git worktree add -q -b done "$TEST_ROOT/elsewhere/done"
+    run bash -c '"$1" remove merged </dev/null' _ "$ZG"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Operation cancelled."* ]]
+    [ -d "$TEST_ROOT/elsewhere/done" ]
+}
+
+@test "zg finalize cancels with exit 1 when there is no input for the prompt" {
+    make_repo
+    git worktree add -q "$TEST_ROOT/elsewhere/ext" -b ext-branch
+    run bash -c '"$1" finalize ext-branch </dev/null' _ "$ZG"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Operation cancelled."* ]]
+    git show-ref --verify --quiet refs/heads/ext-branch
+}
+
+@test "zg prune trees cancels with exit 1 when there is no input for the prompt" {
+    make_repo_with_origin
+    git worktree add -q -b ext "$TEST_ROOT/outside"
+    git push -q -u origin ext
+    git push -q origin --delete ext
+    run bash -c '"$1" prune trees </dev/null' _ "$ZG"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Operation cancelled."* ]]
+    [ -d "$TEST_ROOT/outside" ]
 }

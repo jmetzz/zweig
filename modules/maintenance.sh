@@ -92,7 +92,12 @@ zg_maintenance_prune_trees() {
     fi
 
     if [[ "$force" == "false" ]]; then
-        read -p "Are you sure you want to prune worktrees for deleted remote branches? (y/N): " -n 1 -r
+        # Safe prompt under set -e
+        if ! read -p "Are you sure you want to prune worktrees for deleted remote branches? (y/N): " -n 1 -r; then
+            echo
+            echo "Operation cancelled."
+            return 1
+        fi
         echo
         if [[ ! "$REPLY" =~ ^[Yy]$ ]]; then
             echo "Operation cancelled."

@@ -396,7 +396,8 @@ zg_core_rebuild() {
         return 1
     fi
 
-    # Delegate validations (inside check, protection, prompt) to remove
+    # Delegate validations (inside check, protection, prompt) to remove. remove
+    # returns 1 when its prompt is declined, so rebuild stops before re-adding.
     if [[ "$force" == "true" ]]; then
         zg_core_remove "$wtree" --force || return $?
     else
