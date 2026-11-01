@@ -354,22 +354,38 @@ zg_helpers_worktree_branch() {
     printf '%s\n' "$branch"
 }
 
+# --- Path of the shell shim users should source ---
+# An install keeps each release under <root>/versions/<label> and links the shim
+# at <root>/shims/shims.sh; point at that stable link so a sourced line keeps
+# working after an upgrade. A source checkout has no versions/ and is used as is.
+zg_helpers_shim_path() {
+    printf '%s\n' "${ZWEIG_ROOT%/versions/*}/shims/shims.sh"
+}
+
 # --- Move the caller's shell to a directory (through the shell shim) ---
 # zg runs as a subprocess, so it can't change its caller's directory. The shim
-# (shims/shims.sh) exports ZG_CD_FILE, a file it cd's to once zg exits; write
-# the target there. Without the shim, print the path and how to enable it
-# instead of claiming a switch that didn't happen.
+# (shims/shims.sh) sets ZG_CD_FILE in zg's environment to a zg-cd.* temp file;
+# write the target there as one line, and the shim cd's to it once zg exits
+# successfully. A ZG_CD_FILE not shaped like the shim's is ignored rather than
+# overwritten. Without the shim, print the path and how to enable it instead of
+# claiming a switch that didn't happen.
 # Usage: zg_helpers_request_cd <dir> <what>   e.g. "worktree: foo", "project root"
+# (<what> is printed capitalised when there is no shim: "Worktree: foo").
 zg_helpers_request_cd() {
-    local dir="$1" what="$2"
-    if [[ -n "${ZG_CD_FILE:-}" ]]; then
-        printf '%s\n' "$dir" > "$ZG_CD_FILE" || return 1
-        echo "📂 Switched to $what"
-    else
-        echo "📂 ${what^}"
-        echo "💡 To switch automatically, source the shell shim: . \"$ZWEIG_ROOT/shims/shims.sh\"" >&2
+    local dir="$1" what="$2" handoff="${ZG_CD_FILE:-}"
+    [[ "${handoff##*/}" == zg-cd.* && -f "$handoff" ]] || handoff=""
+    if [[ -n "$handoff" ]] && printf '%s\n' "$dir" 2>/dev/null > "$handoff"; then
+        echo "📂 Switching to $what"
+        echo "   Path: $dir"
+        return 0
     fi
+    echo "📂 ${what^}"
     echo "   Path: $dir"
+    if [[ -n "$handoff" ]]; then
+        echo "❌ Could not hand the directory to the shell shim ($handoff)." >&2
+        return 1
+    fi
+    echo "💡 To switch automatically, source the shell shim: . \"$(zg_helpers_shim_path)\"" >&2
 }
 
 # --- True if the current directory is the given directory or inside it ---
@@ -489,11 +505,11 @@ Meta:
 Extensions:
   zg select                         Fuzzy switch to any worktree of the repo, with a git log
                                      preview (requires fzf).
-  zg create from-pr <pr-id>         Create worktree from GitHub PR (requires gh) and switch to it.
+  zg create from-pr <pr-id>         Create worktree from GitHub PR (requires gh).
 
 Commands that move you (switch/cd, main, root, select, create -s, create from-pr)
 change your shell's directory only with the shell shim sourced; without it they
-print the target path instead:  . "$ZWEIG_ROOT/shims/shims.sh"
+print the target path instead:  . "$(zg_helpers_shim_path)"
 
 EOF
 }

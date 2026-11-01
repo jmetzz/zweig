@@ -3,21 +3,40 @@
 # root, main, select, create -s, create from-pr) change the current shell's
 # directory (a subprocess can't change the parent shell's directory).
 
-# Runs zg with ZG_CD_FILE pointing at a fresh temp file; a command that wants
-# to move the shell writes the target directory there, and we cd to it after a
-# successful run.
-__zg_run() {
-  local cd_file dir rc=0
-  cd_file="$(mktemp "${TMPDIR:-/tmp}/zg-cd.XXXXXX")" || return 1
-  ZG_CD_FILE="$cd_file" command zg "$@" || rc=$?
-  dir="$(cat "$cd_file")"
-  rm -f "$cd_file"
-  if [[ $rc -eq 0 && -n "$dir" ]]; then
-    cd "$dir" || rc=$?
+# Directory handoff: zg moves the shell by writing the target directory (one
+# line, an absolute path) to the file named in ZG_CD_FILE, which we set in
+# zg's environment only; we cd there after a successful run. One file per shell
+# session, created here so subshells share it, recreated if a tmp cleaner
+# removed it, and emptied around every run so a path left by an interrupted or
+# failed run never moves you later.
+__ZG_CD_FILE="$(mktemp "${TMPDIR:-/tmp}/zg-cd.XXXXXX" 2>/dev/null)" || __ZG_CD_FILE=""
+
+__zg_run_with_cd() {
+  local dir="" rc=0
+  if [[ -z "$__ZG_CD_FILE" || ! -f "$__ZG_CD_FILE" ]]; then
+    __ZG_CD_FILE="$(mktemp "${TMPDIR:-/tmp}/zg-cd.XXXXXX" 2>/dev/null)" || __ZG_CD_FILE=""
+  fi
+  if [[ -z "$__ZG_CD_FILE" ]] || ! : 2>/dev/null > "$__ZG_CD_FILE"; then
+    # No usable temp file: still run zg; commands that move you print the path.
+    command zg "$@"
+    return
+  fi
+  ZG_CD_FILE="$__ZG_CD_FILE" command zg "$@" || rc=$?
+  IFS= read -r dir < "$__ZG_CD_FILE" || true
+  : > "$__ZG_CD_FILE"
+  if [[ -n "$dir" ]]; then
+    if [[ $rc -ne 0 ]]; then
+      echo "zg: not changing directory (zg exited $rc)" >&2
+    else
+      cd "$dir" || rc=$?
+    fi
   fi
   return $rc
 }
 
+# cd/switch and create -s predate the handoff and still look the target up
+# with `zg path`; every other command goes through __zg_run_with_cd. For
+# create from-pr -s both apply and land in the same directory.
 zg() {
   if [[ "$1" == "cd" || "$1" == "switch" ]]; then
     local target="${2:-}"
@@ -47,7 +66,7 @@ zg() {
       fi
     done
 
-    __zg_run create "${args[@]}" || return $?
+    __zg_run_with_cd create "${args[@]}" || return $?
 
     if [[ "$switch_after" == "true" && -n "$target" ]]; then
       local dir
@@ -56,6 +75,6 @@ zg() {
       fi
     fi
   else
-    __zg_run "$@"
+    __zg_run_with_cd "$@"
   fi
 }
