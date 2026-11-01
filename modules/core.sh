@@ -344,6 +344,13 @@ zg_core_remove_merged() {
                 echo "⏭️  Skipping $branch: uncommitted work or a merge/rebase in progress, or git can't read it ($dir). Finalize it by hand: zg finalize $branch"
                 skipped=$((skipped + 1)); continue
             fi
+            # git refuses to remove a worktree with an initialized submodule;
+            # forcing deletes the submodule's git dir with any unpushed commits
+            # or stashes, and the busy check above can't see those (#38).
+            if git -C "$dir" submodule status 2>/dev/null | grep -qv '^-'; then
+                echo "⏭️  Skipping $branch: it has an initialized submodule, which removing would discard with any unpushed commits or stashes ($dir). If that's fine: zg remove $branch --force"
+                skipped=$((skipped + 1)); continue
+            fi
             # finalize resolves by name, and a directory named after the branch
             # wins (ADR 0001). If that is a different worktree, finalizing would
             # force-remove the wrong one, so leave this branch for the user.
