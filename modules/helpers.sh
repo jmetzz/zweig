@@ -414,7 +414,8 @@ zg_helpers_is_protected() {
 }
 
 # --- The protection rule: one place for every command ---
-# Takes a branch name and the worktree directory (empty if there is none).
+# Takes a branch name (or the name a user typed, which may be one) and the
+# worktree directory (empty if there is none).
 # Protected means the branch is the default branch, or the directory carries a
 # .protected marker. Bulk sweeps call this directly with what they enumerated.
 zg_helpers_dir_is_protected() {
@@ -423,12 +424,9 @@ zg_helpers_dir_is_protected() {
     [[ -n "$dir" && -f "$dir/.protected" ]]
 }
 
-# --- Guard for remove/finalize without --force ---
-# Takes the name the user typed, the resolved worktree directory (empty if
-# there is none) and the branch checked out there. Fails, with the reason on
-# stderr, when the worktree is protected or holds the default branch. The
-# branch is checked as well as the name, so the guard holds whichever name the
-# worktree was addressed by.
+# --- Guard for remove/finalize without --force: <name> <dir> <branch> ---
+# Fails, reason on stderr, when the typed name or the directory is protected, or
+# the branch is the default one, so no name for the worktree slips past.
 zg_helpers_guard_protected() {
     local name="$1" dir="$2" branch="$3"
     if zg_helpers_dir_is_protected "$name" "$dir"; then
@@ -496,7 +494,8 @@ Worktree Core Lifecycle:
                                      the PR's existing worktree.
   zg create ... -s                  Add -s to any create form to switch into it immediately
                                      (requires the shell shim; see shims/shims.sh).
-  zg (remove|rm) <worktree>         Remove a worktree but keeps the branch.
+  zg (remove|rm) <worktree>         Remove a worktree but keeps the branch. A protected worktree,
+                                     or one holding the default branch, needs --force.
   zg remove merged                  Remove worktrees whose branches are merged into the default branch,
                                      wherever they live on disk; detached ones, and ones with
                                      uncommitted work or a merge/rebase in progress, are skipped.
@@ -505,7 +504,7 @@ Worktree Core Lifecycle:
                                      only by their directory name under the worktree dir.
   zg finalize <branch>              Final cleanup after merge (removes worktree and branch).
                                      The default branch is never deleted, even with --force.
-  zg rebuild <worktree>             Rebuild a worktree (removes and re-adds).
+  zg rebuild <worktree>             Rebuild a worktree (removes and re-adds); guarded like remove.
   zg protect <worktree>             Protect a worktree from accidental deletion.
   zg unprotect <worktree>           Remove protection marker from a worktree.
 
