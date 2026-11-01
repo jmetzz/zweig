@@ -138,6 +138,12 @@ Here are some examples of conversational API usage:
   zg create from-pr 42
   ```
 
+- Remove the worktrees (and local branches) whose remote branch was deleted, for example after a PR merge. Only branches that track a branch on `origin` (pushed with `git push -u`) and whose remote branch is now gone are pruned; branches that were never pushed are kept, and the command refuses to run without an `origin` remote:
+
+  ```bash
+  zg prune trees
+  ```
+
 - Enable the shell shim so commands that move you (`zg cd`/`switch`, `main`, `root`, `select`, `create -s`, `create from-pr`) change your shell's directory. A subprocess can't do that on its own; without the shim these commands print the target path instead. Add to your `.bashrc`/`.zshrc` (or run `install.sh --write-rc`):
 
   ```bash

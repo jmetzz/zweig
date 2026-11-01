@@ -57,6 +57,14 @@ zg_maintenance_prune_metadata() {
     echo "✅ Done."
 }
 
+# A branch's remote counterpart is gone when its upstream is on origin and git
+# reports it `[gone]`. Run after `git fetch --prune`. A branch that was never
+# pushed, tracks a local branch or another remote, or whose upstream origin's
+# fetch refspec doesn't map, is not gone: there's nothing on origin to compare.
+zg_maintenance__upstream_gone() {
+    [[ "$(git for-each-ref --format='%(upstream:remotename) %(upstream:track)' "refs/heads/$1")" == "origin [gone]" ]]
+}
+
 # --- Prune worktrees for deleted remote branches ---
 zg_maintenance_prune_trees() {
     local force="false"
@@ -64,6 +72,12 @@ zg_maintenance_prune_trees() {
     # Check for --force flag
     if [[ "${1:-}" == "--force" ]]; then
         force="true"
+    fi
+
+    # Without origin no branch can be told apart from a never-pushed one.
+    if ! git remote get-url origin >/dev/null 2>&1; then
+        echo "❌ Error: No 'origin' remote configured; can't tell which remote branches are gone." >&2
+        return 1
     fi
 
     if [[ "$force" == "false" ]]; then
@@ -93,7 +107,7 @@ zg_maintenance_prune_trees() {
             continue
         fi
 
-        if ! git ls-remote --exit-code --heads origin "$branch" &>/dev/null; then
+        if zg_maintenance__upstream_gone "$branch"; then
             echo "🔥 Remote branch gone: $branch"
             if ! git worktree remove "$dir"; then
                 echo "❌ Failed to remove worktree dir: $dir" >&2

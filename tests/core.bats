@@ -425,7 +425,7 @@ make_repo_with_origin() {
     git worktree add -q -b ext "$TEST_ROOT/outside"
     "$ZG" create foo >/dev/null
     "$ZG" create kept >/dev/null
-    git push -q origin ext foo kept
+    git push -q -u origin ext foo kept
     git push -q origin --delete ext foo
     run bash -c 'echo y | "$1" prune trees' _ "$ZG"
     [ "$status" -eq 0 ]
@@ -439,6 +439,8 @@ make_repo_with_origin() {
 @test "zg prune trees skips a protected outside worktree" {
     make_repo_with_origin
     git worktree add -q -b ext "$TEST_ROOT/outside"
+    git push -q -u origin ext
+    git push -q origin --delete ext
     touch "$TEST_ROOT/outside/.protected"
     run bash -c 'echo y | "$1" prune trees' _ "$ZG"
     [ "$status" -eq 0 ]
@@ -579,7 +581,7 @@ make_repo_with_origin() {
 @test "zg status and prune trees handle an outside worktree on a slash-named branch" {
     make_repo_with_origin
     git worktree add -q -b feature/x "$TEST_ROOT/outside"
-    git push -q origin feature/x
+    git push -q -u origin feature/x
     run "$ZG" status
     [ "$status" -eq 0 ]
     [[ "$output" == *" feature/x "*"↑0 ↓0"* ]]
@@ -594,7 +596,7 @@ make_repo_with_origin() {
     make_repo_with_origin
     git worktree add -q -b ext "$TEST_ROOT/outside"
     git -C "$TEST_ROOT/outside" commit -q --allow-empty -m "feat: unmerged work"
-    git push -q origin ext
+    git push -q -u origin ext
     git push -q origin --delete ext
     run "$ZG" prune trees --force
     [ "$status" -eq 0 ]
@@ -602,18 +604,75 @@ make_repo_with_origin() {
     ! git show-ref --verify --quiet refs/heads/ext
 }
 
-# foo is pruned because it was never pushed: this relies on the current
-# "not on origin = gone" rule, which #22 may change.
 @test "zg prune trees fails on a locked worktree but still prunes the others" {
     make_repo_with_origin
     git worktree add -q -b ext "$TEST_ROOT/outside"
     git worktree lock "$TEST_ROOT/outside"
     "$ZG" create foo >/dev/null
+    git push -q -u origin ext foo
+    git push -q origin --delete ext foo
     run --separate-stderr bash -c 'echo y | "$1" prune trees' _ "$ZG"
     [ "$status" -ne 0 ]
     [[ "$stderr" == *"Failed to remove worktree dir: $(realdir "$TEST_ROOT/outside")"* ]]
     [ -d "$TEST_ROOT/outside" ]
     [ ! -e "$REPO/.worktrees/foo" ]
+}
+
+@test "zg prune trees keeps worktrees whose branch was never pushed" {
+    make_repo_with_origin
+    git worktree add -q -b ext "$TEST_ROOT/outside"
+    "$ZG" create foo >/dev/null
+    git branch -q --track local-only main
+    git worktree add -q "$TEST_ROOT/tracks-local" local-only
+    run "$ZG" prune trees --force
+    [ "$status" -eq 0 ]
+    [ -d "$TEST_ROOT/outside" ]
+    [ -d "$REPO/.worktrees/foo" ]
+    [ -d "$TEST_ROOT/tracks-local" ]
+    git show-ref --verify --quiet refs/heads/ext
+    git show-ref --verify --quiet refs/heads/foo
+    git show-ref --verify --quiet refs/heads/local-only
+}
+
+@test "zg prune trees keeps a worktree whose upstream is on another remote" {
+    make_repo_with_origin
+    git init -q --bare "$TEST_ROOT/fork.git"
+    git remote add fork "$TEST_ROOT/fork.git"
+    git worktree add -q -b ext "$TEST_ROOT/outside"
+    git push -q -u fork ext
+    git push -q fork --delete ext
+    git fetch -q --prune fork
+    run "$ZG" prune trees --force
+    [ "$status" -eq 0 ]
+    [ -d "$TEST_ROOT/outside" ]
+    git show-ref --verify --quiet refs/heads/ext
+}
+
+@test "zg prune trees keeps a live branch that origin's fetch refspec doesn't map" {
+    make_repo_with_origin
+    git config remote.origin.fetch '+refs/heads/main:refs/remotes/origin/main'
+    git worktree add -q -b ext "$TEST_ROOT/outside"
+    git push -q -u origin ext
+    run "$ZG" prune trees --force
+    [ "$status" -eq 0 ]
+    [ -d "$TEST_ROOT/outside" ]
+    git show-ref --verify --quiet refs/heads/ext
+}
+
+@test "zg prune trees refuses without an origin remote and removes nothing" {
+    make_repo
+    git worktree add -q -b ext "$TEST_ROOT/outside"
+    "$ZG" create foo >/dev/null
+    run --separate-stderr bash -c 'echo y | "$1" prune trees' _ "$ZG"
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"No 'origin' remote"* ]]
+    [[ "$output" != *"Are you sure"* ]]
+    [ -d "$TEST_ROOT/outside" ]
+    [ -d "$REPO/.worktrees/foo" ]
+    run "$ZG" prune trees --force
+    [ "$status" -eq 1 ]
+    [ -d "$TEST_ROOT/outside" ]
+    git show-ref --verify --quiet refs/heads/ext
 }
 
 @test "zg remove merged finalizes an outside worktree whose branch is merged" {
