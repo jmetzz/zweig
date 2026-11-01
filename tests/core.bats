@@ -320,7 +320,7 @@ realdir() { (cd "$1" && pwd -P); }
     git worktree add -q "$TEST_ROOT/elsewhere/ext" -b ext-branch
     touch "$TEST_ROOT/elsewhere/ext/stale-file"
     run bash -c 'echo n | "$1" rebuild ext-branch' _ "$ZG"
-    [ "$status" -eq 0 ]
+    [ "$status" -eq 1 ]
     [[ "$output" != *"Rebuilt"* ]]
     [ -e "$TEST_ROOT/elsewhere/ext/stale-file" ]
 }
@@ -799,13 +799,13 @@ make_repo_with_origin() {
     git show-ref --verify --quiet refs/heads/ext
 }
 
-@test "zg prune trees removes nothing when the prompt is declined" {
+@test "zg prune trees exits non-zero and removes nothing when the prompt is declined" {
     make_repo_with_origin
     git worktree add -q -b ext "$TEST_ROOT/outside"
     git push -q -u origin ext
     git push -q origin --delete ext
     run bash -c 'echo n | "$1" prune trees' _ "$ZG"
-    [ "$status" -eq 0 ]
+    [ "$status" -eq 1 ]
     [[ "$output" == *"Operation cancelled."* ]]
     [ -d "$TEST_ROOT/outside" ]
     git show-ref --verify --quiet refs/heads/ext
@@ -1779,4 +1779,34 @@ STUB
     [[ "$output" != *"already exists"* ]]
     [[ "$output" != *"Several worktrees"* ]]
     [ "$(git -C "$REPO/.worktrees/pr-42-pr-branch" branch --show-current)" = "pr-branch" ]
+}
+
+@test "zg remove exits non-zero and keeps the worktree when the prompt is declined" {
+    make_repo
+    git worktree add -q "$TEST_ROOT/elsewhere/ext" -b ext-branch
+    run bash -c 'echo n | "$1" remove ext-branch' _ "$ZG"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Operation cancelled."* ]]
+    [ -d "$TEST_ROOT/elsewhere/ext" ]
+    git show-ref --verify --quiet refs/heads/ext-branch
+}
+
+@test "zg remove merged exits non-zero and keeps everything when the prompt is declined" {
+    make_repo_with_origin
+    git worktree add -q -b done "$TEST_ROOT/elsewhere/done"
+    run bash -c 'echo n | "$1" remove merged' _ "$ZG"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Operation cancelled."* ]]
+    [ -d "$TEST_ROOT/elsewhere/done" ]
+    git show-ref --verify --quiet refs/heads/done
+}
+
+@test "zg finalize exits non-zero and keeps worktree and branch when the prompt is declined" {
+    make_repo
+    git worktree add -q "$TEST_ROOT/elsewhere/ext" -b ext-branch
+    run bash -c 'echo n | "$1" finalize ext-branch' _ "$ZG"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Operation cancelled."* ]]
+    [ -d "$TEST_ROOT/elsewhere/ext" ]
+    git show-ref --verify --quiet refs/heads/ext-branch
 }

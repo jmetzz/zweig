@@ -96,7 +96,7 @@ zg_maintenance_prune_trees() {
         echo
         if [[ ! "$REPLY" =~ ^[Yy]$ ]]; then
             echo "Operation cancelled."
-            return 0
+            return 1
         fi
     fi
 
