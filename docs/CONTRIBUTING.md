@@ -18,19 +18,13 @@ For a detailed list of commands and their usage, run `zg help`.
 
 This project uses a `Makefile` to consolidate all the development commands.
 
-To run the tests you need `bats`: on your `PATH`, the vendored submodule (`git submodule update --init tests/bats-core`), or installed via `basher`. To use `basher`, install it with:
+To run the tests you need `bats`. If you don't have it, fetch the vendored copy:
 
 ```bash
-curl -s https://raw.githubusercontent.com/basherpm/basher/master/install.sh | bash
+git submodule update --init tests/bats-core
 ```
 
-Once you have `basher` installed, you can install the development dependencies:
-
-```bash
-make install_deps
-```
-
-This will install the testing framework `bats-core`.
+Optionally, if you use [`basher`](https://github.com/basherpm/basher), `make install_deps` installs `bats-core` with it instead. `tests/run_tests.sh` lists where it looks for `bats`.
 
 ## 🚧 Process
 
@@ -65,8 +59,6 @@ To run the test suite, run:
 ```bash
 make test
 ```
-
-`make test` looks for `bats` on `PATH`, then in `tests/bats-core`, then in basher's install; `basher` is not required.
 
 ## 🚀 CI & Releases
 
