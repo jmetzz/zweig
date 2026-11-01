@@ -18,7 +18,7 @@ For a detailed list of commands and their usage, run `zg help`.
 
 This project uses a `Makefile` to consolidate all the development commands.
 
-To get started, you need to have `basher` installed. If you don't have it, you can install it with Homebrew:
+To run the tests you need `bats`: on your `PATH`, the vendored submodule (`git submodule update --init tests/bats-core`), or installed via `basher`. To use `basher`, install it with:
 
 ```bash
 curl -s https://raw.githubusercontent.com/basherpm/basher/master/install.sh | bash
@@ -65,6 +65,8 @@ To run the test suite, run:
 ```bash
 make test
 ```
+
+`make test` looks for `bats` on `PATH`, then in `tests/bats-core`, then in basher's install; `basher` is not required.
 
 ## 🚀 CI & Releases
 

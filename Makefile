@@ -52,7 +52,7 @@ install_deps: check-basher ## Install basher deps from ./deps
 		echo "No deps file or empty; skipping basher install."; \
 	fi
 
-test: install_deps ## Run test suite
+test: ## Run test suite (bats from PATH, tests/bats-core, or basher)
 	@./tests/run_tests.sh
 
 smoke: ## Run smoke tests
