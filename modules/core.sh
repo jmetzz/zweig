@@ -7,7 +7,6 @@
 
 # --- Jump to the main worktree (default branch) ---
 zg_core_main() {
-    echo "Attempting to switch to main worktree: $ZWEIG_DEFAULT_BRANCH"
     zg_core_switch "$ZWEIG_DEFAULT_BRANCH"
 }
 
