@@ -110,8 +110,8 @@ shellcheck $(find . -name '*.sh')
 
 Automated tests live in `tests/*.bats` and run against the real `bin/zg` in a disposable repo with a fake `HOME`.
 
-* `make test` runs the `bats` suite (requires `basher`; installs `bats-core` from `deps`).
-* Without `basher`, use the vendored submodule: `git submodule update --init tests/bats-core && tests/bats-core/bin/bats tests/`.
+* `make test` runs the `bats` suite via `tests/run_tests.sh`, which uses `bats` from `PATH`, else the vendored `tests/bats-core/bin/bats`, else basher's. It does not require `basher`.
+* To get bats without installing it: `git submodule update --init tests/bats-core` (or install `bats-core`). `make install_deps` still installs it via `basher`.
 * `make smoke` runs `tests/smoke.sh`, a secondary manual check that expects `zg` on `PATH`.
 
 Add a bats test for every behavior change; anything not covered still needs manual testing.
