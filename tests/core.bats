@@ -1238,7 +1238,6 @@ stub_gh() {
 }
 
 @test "without the shim, a stray ZG_CD_FILE is left alone; an unwritable handoff file fails" {
-    [ "$(id -u)" -ne 0 ] || skip "root can write a read-only file"
     make_repo
     printf 'keep me\n' > "$TEST_ROOT/notes.txt"
     ZG_CD_FILE="$TEST_ROOT/notes.txt" run --separate-stderr "$ZG" root
@@ -1249,6 +1248,8 @@ stub_gh() {
     ZG_CD_FILE="$TEST_ROOT/zg-cd.gone" run --separate-stderr "$ZG" root
     [ "$status" -eq 0 ]
     [ ! -e "$TEST_ROOT/zg-cd.gone" ]
+    [[ "$stderr" == *"source the shell shim"* ]]
+    [ "$(id -u)" -ne 0 ] || skip "root can write a read-only file"
     : > "$TEST_ROOT/zg-cd.ro"
     chmod 444 "$TEST_ROOT/zg-cd.ro"
     ZG_CD_FILE="$TEST_ROOT/zg-cd.ro" run --separate-stderr "$ZG" root

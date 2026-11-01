@@ -8,9 +8,10 @@
 # zg's environment only; we cd there after a successful run. One file per shell
 # session, created here so subshells share it, recreated if a tmp cleaner
 # removed it, and emptied around every run so a path left by an interrupted or
-# failed run never moves you later. Overlapping runs (zg ... &) share it, so
-# only the foreground one should be a command that moves you. The zg-cd.
-# name prefix is checked by zg_helpers_request_cd; keep the two in sync.
+# failed run never moves you later. Overlapping runs (zg ... &) share it: a
+# background run can empty or overwrite the path a foreground run left, so the
+# shell may not move, or move where the other run pointed. The zg-cd. name
+# prefix is checked by zg_helpers_request_cd; keep the two in sync.
 __ZG_CD_FILE="$(mktemp "${TMPDIR:-/tmp}/zg-cd.XXXXXX" 2>/dev/null)" || __ZG_CD_FILE=""
 
 __zg_run_with_cd() {

@@ -368,8 +368,8 @@ zg_helpers_shim_path() {
 # write the target there as one line, and the shim cd's to it once zg exits
 # successfully. A ZG_CD_FILE that isn't an existing zg-cd.* file (the name
 # shims/shims.sh uses; keep in sync) is ignored rather than overwritten, and
-# treated as no shim. Without the shim, print the path and how to enable it instead of
-# claiming a switch that didn't happen.
+# treated as no shim. Without the shim, print the path and how to enable it
+# instead of claiming a switch that didn't happen.
 # Usage: zg_helpers_request_cd <dir> <what>   e.g. "worktree: foo", "project root"
 # (<what> is printed capitalised when the handoff isn't used: "Worktree: foo").
 zg_helpers_request_cd() {
