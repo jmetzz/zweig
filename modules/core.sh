@@ -456,23 +456,59 @@ zg_core_finalize() {
     branch="$(zg_helpers_worktree_branch "$dir")" || return 1
   fi
 
+  # Without a worktree there is only a branch to act on: the default branch is
+  # never deleted, and an unknown name has nothing to finalize.
+  local has_branch="false"
+  if [[ -n "$branch" ]] && git show-ref --verify --quiet "refs/heads/$branch"; then
+    has_branch="true"
+  fi
+  if [[ -z "$dir" ]]; then
+    if [[ "$branch" == "$ZWEIG_DEFAULT_BRANCH" ]]; then
+      echo "ℹ️ Nothing to finalize: the default branch '$branch' is never deleted."
+      return 0
+    fi
+    if [[ "$has_branch" == "false" ]]; then
+      echo "❌ No worktree or local branch named '$target'" >&2
+      return 1
+    fi
+  fi
+
   # Protected worktrees, and the default branch wherever it is checked out,
   # require --force
   if [[ "$force" == "false" ]]; then
     zg_helpers_guard_protected "$target" "$dir" "$branch" || return 1
   fi
 
+  # The default branch is never deleted, not even with --force.
+  local delete_branch="false"
+  if [[ "$has_branch" == "true" && "$branch" != "$ZWEIG_DEFAULT_BRANCH" ]]; then
+    delete_branch="true"
+  fi
+
   # Safe confirmation
   if [[ "$force" == "false" ]]; then
-    if ! read -p "Finalize '$target' (remove worktree & delete local branch)? (y/N): " -n 1 -r; then
+    local what
+    if [[ -z "$dir" ]]; then
+      what="delete local branch '$branch' (no worktree)"
+    elif [[ -z "$branch" ]]; then
+      what="remove worktree $dir (detached; no branch to delete)"
+    elif [[ "$delete_branch" == "true" ]]; then
+      what="remove worktree $dir and delete local branch '$branch'"
+    else
+      what="remove worktree $dir (keeps branch '$branch')"
+    fi
+    if ! read -p "Finalize '$target': $what? (y/N): " -n 1 -r; then
       echo; echo "Operation cancelled."; return 1
     fi
     echo
     [[ "$REPLY" =~ ^[Yy]$ ]] || { echo "Operation cancelled."; return 1; }
   fi
 
-  # Fresh remote info (optional but helpful)
-  zg_helpers_fetch_origin || return 1
+  # Fresh remote info, only when a branch will be deleted. Done before the
+  # worktree is removed so a failed fetch changes nothing.
+  if [[ "$delete_branch" == "true" ]]; then
+    zg_helpers_fetch_origin || return 1
+  fi
 
   # Remove worktree (respect --force)
   if [[ -n "$dir" ]]; then
@@ -481,25 +517,21 @@ zg_core_finalize() {
     else
       git worktree remove "$dir" || { echo "❌ Failed to remove worktree: $target" >&2; return 1; }
     fi
-  fi
-
-  # The default branch is never deleted, not even with --force.
-  if [[ "$branch" == "$ZWEIG_DEFAULT_BRANCH" ]]; then
-    if [[ -n "$dir" ]]; then
-      echo "✅ Removed worktree '$target'; kept the default branch '$branch'."
-    else
-      echo "ℹ️ Nothing to finalize: the default branch '$branch' is never deleted."
+    if [[ "$delete_branch" == "false" ]]; then
+      if [[ -n "$branch" ]]; then
+        echo "✅ Removed worktree '$target'; kept the default branch '$branch'."
+      else
+        echo "✅ Removed detached worktree '$target'."
+      fi
+      return 0
     fi
-    return 0
   fi
 
-  # Delete local branch if present (will fail if not merged—fine)
-  if [[ -n "$branch" ]] && git show-ref --verify --quiet "refs/heads/$branch"; then
-    git branch -d "$branch" || {
-      echo "⚠️ Branch $branch not deleted (not fully merged?)."
-      [[ "$force" == "true" ]] && echo "Hint: use 'git branch -D $branch' to force."
-    }
-  fi
+  # Will fail if not merged—fine
+  git branch -d "$branch" || {
+    echo "⚠️ Branch $branch not deleted (not fully merged?)."
+    [[ "$force" == "true" ]] && echo "Hint: use 'git branch -D $branch' to force."
+  }
 
   echo "✅ Finalized and cleaned up: $target"
 }
