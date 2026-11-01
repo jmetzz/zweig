@@ -63,12 +63,17 @@ zg_extensions_from_pr() {
 
     # Offline fast path: a single worktree for this PR (pr-<N>-*, or the bare
     # <N> older versions used) means it was set up before, so switch to it
-    # without asking GitHub. Only directories with a .git entry count, so a
-    # leftover plain directory is ignored. With several (e.g. the PR's head
-    # branch was renamed) let gh decide which one is current.
-    local candidate found="" count=0
+    # without asking GitHub. Only live worktrees count: a leftover plain
+    # directory, or one whose .git points at a removed gitdir, is ignored, and
+    # so is a bare <N> worktree on a branch literally named <N> (made by
+    # `zg create <N>`, not by from-pr). With several (e.g. the PR's head branch
+    # was renamed) let gh decide which one is current.
+    local candidate candidate_branch found="" count=0
     for candidate in "$ZWEIG_WORKTREE_DIR/$pr_id" "$ZWEIG_WORKTREE_DIR/$prefix"*; do
+        # The .git check comes first: without one, git -C would find the parent repo.
         [[ -d "$candidate" && -e "$candidate/.git" ]] || continue
+        candidate_branch="$(git -C "$candidate" rev-parse --abbrev-ref HEAD 2>/dev/null)" || continue
+        [[ "$candidate" == "$ZWEIG_WORKTREE_DIR/$pr_id" && "$candidate_branch" == "$pr_id" ]] && continue
         found="$candidate"
         count=$((count + 1))
     done
@@ -81,12 +86,21 @@ zg_extensions_from_pr() {
     fi
 
     # Resolve the PR head branch. gh's stderr is kept apart from the branch
-    # name so its reason (logged out, offline, no such PR) can be shown.
+    # name (gh may warn on stderr even when it succeeds) so its reason
+    # (logged out, offline, no such PR) can be shown. The temp file is removed
+    # even if gh is interrupted.
     local branch gh_err gh_reason=""
     gh_err="$(mktemp "${TMPDIR:-/tmp}/zg-gh.XXXXXX")" || gh_err=/dev/null
+    if [[ "$gh_err" != /dev/null ]]; then
+        # shellcheck disable=SC2064 # expand now: gh_err is local
+        trap "rm -f '$gh_err'; exit 130" INT TERM
+    fi
     branch="$(gh pr view "$pr_id" --json headRefName -q .headRefName 2>"$gh_err" || true)"
     if [[ "$gh_err" != /dev/null ]]; then
-        IFS= read -r gh_reason < "$gh_err" || true
+        trap - INT TERM
+        # Up to three lines, joined, so a reason on a later line isn't lost.
+        gh_reason="$(head -n 3 "$gh_err" | tr '\n' ' ')"
+        gh_reason="${gh_reason%% }"
         rm -f "$gh_err"
     fi
     if [[ -z "$branch" ]]; then
@@ -95,8 +109,8 @@ zg_extensions_from_pr() {
     fi
 
     # The branch may already be checked out anywhere (a worktree made by
-    # another tool, or one renamed on disk): switch there rather than fail on
-    # add. Switch by the path git reports, not by name: a worktree-dir
+    # another tool, or one moved with `git worktree move`): switch there rather
+    # than fail on add. Switch by the path git reports, not by name: a worktree-dir
     # directory named like the branch could otherwise shadow it (docs/adr/0001).
     local existing rc=0
     existing="$(zg_helpers_branch_worktree_path "$branch")" || rc=$?
