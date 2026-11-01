@@ -12,14 +12,21 @@ export ZWEIG_DEFAULT_SYNC_SCOPE="${ZWEIG_DEFAULT_SYNC_SCOPE:-current}"
 export ZWEIG_COPY_ON_CREATE="${ZWEIG_COPY_ON_CREATE:-.env .env.local .env.development .env.test .env.production AGENTS.md CLAUDE.md GEMINI.md .claude .cursor .codex .antigravity}"
 
 # --- Resolve the control repo root (works from inside a linked worktree too) ---
-# Uses git-common-dir, which always points at the main repo's .git, so the same
+# Uses git-common-dir, which always points at the main repo's git dir, so the same
 # root (and thus the same worktree dir) resolves no matter which worktree, or
 # which subfolder of one, you're in. Prints a physical path.
+# The parent of the git dir is only the root if <parent>/.git really is that git
+# dir. When .git is a symlink, or GIT_DIR points elsewhere, it is not: then the
+# root is the nearest ancestor of the current top level whose .git resolves to
+# the git dir. Git keeps no pointer back to the main checkout, so a linked
+# worktree outside the repo can't be resolved.
+# Returns 1 outside a work tree (or in a bare repo), 2 when the root can't be
+# determined reliably (never guesses).
 zg__control_root() {
-  local git_common_dir abs
+  local git_common_dir abs top candidate
   git_common_dir="$(git rev-parse --git-common-dir 2>/dev/null)" || return 1
   # Only inside a work tree (not a bare repo's git dir).
-  git rev-parse --show-toplevel >/dev/null 2>&1 || return 1
+  top="$(git rev-parse --show-toplevel 2>/dev/null)" || return 1
   if [[ "$git_common_dir" == /* ]]; then
     abs="$git_common_dir"
   else
@@ -27,15 +34,33 @@ zg__control_root() {
     # checkout) is relative to the current directory, not the top level.
     abs="$(pwd -P)/$git_common_dir"
   fi
-  # cd collapses "sub/../.git/.." lexically; pwd -P then resolves symlinks, so
-  # symlinked prefixes (macOS /var) can't give one repo two roots.
-  (cd "$abs/.." && pwd -P)
+  # pwd -P resolves symlinks, so symlinked prefixes (macOS /var) can't give one
+  # repo two roots.
+  abs="$(cd "$abs" 2>/dev/null && pwd -P)" || return 2
+  top="$(cd "$top" 2>/dev/null && pwd -P)" || return 2
+
+  candidate="$(dirname "$abs")"
+  # A bare main repo has no checkout: its parent directory is the root.
+  if [[ "$(git --git-dir="$abs" rev-parse --is-bare-repository 2>/dev/null)" == true ]] \
+    || [[ "$(cd "$candidate/.git" 2>/dev/null && pwd -P)" == "$abs" ]]; then
+    echo "$candidate"
+    return 0
+  fi
+  candidate="$top"
+  while :; do
+    if [[ "$(cd "$candidate/.git" 2>/dev/null && pwd -P)" == "$abs" ]]; then
+      echo "$candidate"
+      return 0
+    fi
+    [[ "$candidate" != / ]] || return 2
+    candidate="$(dirname "$candidate")"
+  done
 }
 
 # --- Worktree directory: repo-local by default, override wins, $HOME as last resort ---
 if [[ -n "${ZWEIG_WORKTREE_DIR:-}" ]]; then
   : # explicit override wins
-elif _zg_control_root="$(zg__control_root)"; then
+elif _zg_control_root="$(zg__control_root 2>/dev/null)"; then
   ZWEIG_WORKTREE_DIR="$_zg_control_root/.worktrees"
 else
   ZWEIG_WORKTREE_DIR="$HOME/.worktrees"
@@ -113,6 +138,15 @@ zg() {
     help|version) ;;  # allowed outside repos
     *) if ! zg_helpers_inside_git_repo; then
          echo "❌ Not inside a Git repository"; return 1
+       fi
+       # Refuse rather than put worktrees in a wrong place (rc 1 = bare repo,
+       # handled by each command's own fallback).
+       local _zg_root_rc=0
+       zg__control_root >/dev/null || _zg_root_rc=$?
+       if ((_zg_root_rc == 2)); then
+         echo "❌ Cannot determine the repository root (is GIT_DIR set, or is this a linked worktree of a repo whose .git is a symlink, outside that repo?)." >&2
+         echo "   Run zg from the main checkout, or unset GIT_DIR." >&2
+         return 1
        fi ;;
   esac
 

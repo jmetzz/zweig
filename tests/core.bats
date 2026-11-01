@@ -1861,3 +1861,48 @@ STUB
     [[ "$output" == *"Operation cancelled."* ]]
     [ -d "$TEST_ROOT/outside" ]
 }
+
+# Moves the repo's git dir out of the work tree and symlinks it back as .git.
+make_symlinked_git_repo() {
+    make_repo
+    mv "$REPO/.git" "$TEST_ROOT/gitstore"
+    ln -s "$TEST_ROOT/gitstore" "$REPO/.git"
+}
+
+@test "zg create places the worktree under the repo when .git is a symlink" {
+    make_symlinked_git_repo
+    run "$ZG" create foo
+    [ "$status" -eq 0 ]
+    [ -d "$REPO/.worktrees/foo" ]
+    [ ! -e "$TEST_ROOT/.worktrees" ]
+}
+
+@test "zg create from inside a linked worktree uses the repo's .worktrees when .git is a symlink" {
+    make_symlinked_git_repo
+    "$ZG" create foo
+    cd "$REPO/.worktrees/foo"
+    run "$ZG" create bar
+    [ "$status" -eq 0 ]
+    [ -d "$REPO/.worktrees/bar" ]
+    [ ! -e "$TEST_ROOT/.worktrees" ]
+}
+
+@test "zg refuses with a clear error when GIT_DIR hides the repo root" {
+    make_repo
+    mv "$REPO/.git" "$TEST_ROOT/gitstore"
+    export GIT_DIR="$TEST_ROOT/gitstore"
+    run --separate-stderr "$ZG" create foo
+    [ "$status" -ne 0 ]
+    [[ "$stderr" == *"Cannot determine the repository root"* ]]
+    [ ! -e "$TEST_ROOT/.worktrees" ]
+    [ ! -e "$HOME/.worktrees" ]
+    [ ! -e "$REPO/.worktrees" ]
+}
+
+@test "zg help still works when GIT_DIR hides the repo root" {
+    make_repo
+    mv "$REPO/.git" "$TEST_ROOT/gitstore"
+    export GIT_DIR="$TEST_ROOT/gitstore"
+    run "$ZG" help
+    [ "$status" -eq 0 ]
+}
