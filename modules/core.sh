@@ -432,7 +432,8 @@ zg_core_finalize() {
   [[ ${2:-} == "--force" ]] && force="true"
 
   # Find the worktree first: the guards below need its real branch. It may be
-  # gone already; finalize then only deletes the branch named <target>.
+  # gone already; finalize then only deletes the branch named <target>, unless
+  # that is the default branch.
   local dir="" branch="$target"
   if dir="$(zg_helpers_resolve_worktree "$target")"; then
     # Avoid operating inside the target worktree
