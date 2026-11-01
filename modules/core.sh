@@ -317,7 +317,7 @@ zg_core_remove_merged() {
     local removed=0 skipped=0 failed=0
 
     echo "🧹 Checking for worktrees merged into $base ..."
-    local branches dirs i branch dir target target_real dir_real rc=0
+    local branches dirs i branch dir target target_real dir_real sm_status rc=0
     # A worktree with a missing directory is only warned about (rc 2): there is
     # nothing on disk to remove, and `zg prune metadata` cleans it up.
     zg_helpers_load_worktrees branches dirs || rc=$?
@@ -346,8 +346,13 @@ zg_core_remove_merged() {
             fi
             # git refuses to remove a worktree with an initialized submodule;
             # forcing deletes the submodule's git dir with any unpushed commits
-            # or stashes, and the busy check above can't see those (#38).
-            if git -C "$dir" submodule status 2>/dev/null | grep -qv '^-'; then
+            # or stashes, and the busy check above can't see those (#38). If git
+            # can't list the submodules, skip too rather than risk that.
+            if ! sm_status="$(git -C "$dir" submodule status 2>/dev/null)"; then
+                echo "⏭️  Skipping $branch: git can't read its submodules ($dir). Check them, then: zg remove $branch --force"
+                skipped=$((skipped + 1)); continue
+            fi
+            if printf '%s' "$sm_status" | grep -qv '^-'; then
                 echo "⏭️  Skipping $branch: it has an initialized submodule, which removing would discard with any unpushed commits or stashes ($dir). If that's fine: zg remove $branch --force"
                 skipped=$((skipped + 1)); continue
             fi
