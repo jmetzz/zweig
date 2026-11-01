@@ -72,18 +72,19 @@ zg_maintenance__upstream_gone() {
 
 # --- Prune worktrees for deleted remote branches ---
 zg_maintenance_prune_trees() {
-    local force="false"
+    local force="false" arg
 
-    case "${1:-}" in
-        "") ;;
-        --force) force="true" ;;
-        *)
-            echo "❌ Error: Unknown argument: $1 (usage: zg prune trees [--force])" >&2
+    for arg in "$@"; do
+        if [[ "$arg" == "--force" && "$force" == "false" ]]; then
+            force="true"
+        else
+            echo "❌ Error: Unknown argument: $arg (usage: zg prune trees [--force])" >&2
             return 1
-            ;;
-    esac
+        fi
+    done
 
-    # Without origin no branch can be told apart from a never-pushed one.
+    # Without origin no upstream can be reported gone, so nothing could be told
+    # apart from a branch that was never pushed.
     # Checked before the prompt, so we never ask to confirm a refusal.
     if ! zg_helpers_has_origin; then
         echo "❌ Error: No 'origin' remote configured; can't tell which remote branches are gone." >&2
@@ -119,12 +120,12 @@ zg_maintenance_prune_trees() {
 
         if zg_maintenance__upstream_gone "$branch"; then
             echo "🔥 Remote branch gone: $branch"
-            pruned=$((pruned + 1))
             if ! git worktree remove "$dir"; then
                 echo "❌ Failed to remove worktree dir: $dir" >&2
                 failed=1
                 continue
             fi
+            pruned=$((pruned + 1))
             echo "✅ Worktree removed."
 
             if ! git branch -d "$branch"; then
@@ -146,7 +147,7 @@ zg_maintenance_prune_trees() {
         return 1
     fi
     if ((pruned == 0)); then
-        echo "ℹ️ No worktrees with a gone upstream found."
+        echo "ℹ️ No worktrees pruned."
         return 0
     fi
     echo "✅ Cleanup complete."

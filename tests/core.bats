@@ -445,6 +445,7 @@ make_repo_with_origin() {
     run bash -c 'echo y | "$1" prune trees' _ "$ZG"
     [ "$status" -eq 0 ]
     [[ "$output" == *"Skipping protected: ext"* ]]
+    [[ "$output" == *"No worktrees pruned."* ]]
     [ -d "$TEST_ROOT/outside" ]
 }
 
@@ -628,7 +629,7 @@ make_repo_with_origin() {
     git worktree add -q "$TEST_ROOT/tracks-local" local-only
     run "$ZG" prune trees --force
     [ "$status" -eq 0 ]
-    [[ "$output" == *"No worktrees with a gone upstream found."* ]]
+    [[ "$output" == *"No worktrees pruned."* ]]
     [ -d "$TEST_ROOT/outside" ]
     [ -d "$REPO/.worktrees/foo" ]
     [ -d "$TEST_ROOT/tracks-local" ]
@@ -713,6 +714,11 @@ make_repo_with_origin() {
     [[ "$stderr" == *"Unknown argument: --forse"* ]]
     [[ "$output" != *"Are you sure"* ]]
     [ -d "$TEST_ROOT/outside" ]
+    run --separate-stderr "$ZG" prune trees --force extra
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"Unknown argument: extra"* ]]
+    [ -d "$TEST_ROOT/outside" ]
+    git show-ref --verify --quiet refs/heads/ext
 }
 
 @test "zg prune trees refuses without an origin remote and removes nothing" {
