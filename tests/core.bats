@@ -1162,9 +1162,10 @@ with_shim() {
 }
 
 # Stubs gh so `gh pr view <N> --json headRefName -q .headRefName` prints $GH_HEAD.
+# Without GH_HEAD it fails, printing $GH_ERR (if set) on stderr.
 stub_gh() {
     mkdir -p "$TEST_ROOT/bin"
-    printf '#!/bin/sh\n[ -n "${GH_HEAD:-}" ] || exit 1\nprintf "%%s\\n" "$GH_HEAD"\n' > "$TEST_ROOT/bin/gh"
+    printf '#!/bin/sh\nif [ -z "${GH_HEAD:-}" ]; then [ -n "${GH_ERR:-}" ] && echo "$GH_ERR" >&2; exit 1; fi\nprintf "%%s\\n" "$GH_HEAD"\n' > "$TEST_ROOT/bin/gh"
     chmod +x "$TEST_ROOT/bin/gh"
     export PATH="$TEST_ROOT/bin:$PATH"
 }
@@ -1385,7 +1386,7 @@ STUB
     git push -q origin main:pr-branch
     git worktree add -q "$REPO/.worktrees/42" -b pr-branch
     stub_gh
-    export GH_HEAD=pr-branch
+    unset GH_HEAD # found offline, without asking gh
     run "$ZG" create from-pr 42
     [ "$status" -eq 0 ]
     [[ "$output" == *"Path: $(realdir "$REPO")/.worktrees/42"* ]]
@@ -1412,11 +1413,14 @@ STUB
     make_repo
     git worktree add -q "$REPO/.worktrees/pr-42-old-name" -b old-name
     git worktree add -q "$TEST_ROOT/elsewhere/new" -b new-name
+    # Named like the current branch but holding another one: only gh's answer,
+    # looked up by branch, may decide.
     git worktree add -q "$REPO/.worktrees/pr-42-new-name" -b decoy
     stub_gh
     export GH_HEAD=new-name
     run "$ZG" create from-pr 42
     [ "$status" -eq 0 ]
+    [[ "$output" == *"Several worktrees match PR #42"* ]]
     [[ "$output" == *"Path: $(realdir "$TEST_ROOT/elsewhere/new")"* ]]
 }
 
@@ -1437,10 +1441,82 @@ STUB
     make_repo
     stub_gh
     export GH_HEAD=pr-branch
-    for bad in ../x 4/2 abc 0; do
-        run "$ZG" create from-pr "$bad"
+    for bad in ../x 4/2 abc 0 042 '4*' +4; do
+        run --separate-stderr "$ZG" create from-pr "$bad"
         [ "$status" -eq 1 ]
-        [[ "$output" == *"PR ID must be a number"* ]]
+        [[ "$stderr" == *"PR ID must be a number"* ]]
     done
+    run --separate-stderr "$ZG" create from-pr
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"Missing PR ID"* ]]
+    [ ! -e "$REPO/.worktrees" ]
+}
+
+@test "zg create from-pr creates a new worktree when several pr-<N>-* exist and none holds the PR branch" {
+    make_repo_with_origin
+    git push -q origin main:renamed
+    git worktree add -q "$REPO/.worktrees/pr-42-first" -b first
+    git worktree add -q "$REPO/.worktrees/pr-42-second" -b second
+    stub_gh
+    export GH_HEAD=renamed
+    run "$ZG" create from-pr 42
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Several worktrees match PR #42"* ]]
+    [ "$(git -C "$REPO/.worktrees/pr-42-renamed" branch --show-current)" = "renamed" ]
+    [[ "$output" == *"Path: $(realdir "$REPO")/.worktrees/pr-42-renamed"* ]]
+}
+
+@test "zg create from-pr ignores a leftover pr-<N>-* directory that isn't a worktree" {
+    make_repo_with_origin
+    git push -q origin main:pr-branch
+    mkdir -p "$REPO/.worktrees/pr-42-leftover"
+    stub_gh
+    export GH_HEAD=pr-branch
+    run "$ZG" create from-pr 42
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"already exists"* ]]
+    [ "$(git -C "$REPO/.worktrees/pr-42-pr-branch" branch --show-current)" = "pr-branch" ]
+}
+
+@test "zg create from-pr reports a PR branch whose worktree directory was deleted, creating nothing" {
+    make_repo_with_origin
+    git push -q origin main:pr-branch
+    git worktree add -q "$TEST_ROOT/elsewhere/gone" -b pr-branch
+    rm -rf "$TEST_ROOT/elsewhere/gone"
+    stub_gh
+    export GH_HEAD=pr-branch
+    run "$ZG" create from-pr 42
+    [ "$status" -eq 1 ]
+    [[ "$output" != *"already checked out"* ]]
+    [[ "$output" == *"zg prune metadata"* ]]
+    [ ! -e "$REPO/.worktrees" ]
+}
+
+@test "zg create from-pr shows gh's reason when it can't resolve the PR" {
+    make_repo
+    stub_gh
+    unset GH_HEAD
+    export GH_ERR="To get started with GitHub CLI, please run:  gh auth login"
+    run --separate-stderr "$ZG" create from-pr 42
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"PR #42: To get started with GitHub CLI"* ]]
+    unset GH_ERR
+    run --separate-stderr "$ZG" create from-pr 42
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"PR #42: not found or no access"* ]]
+}
+
+@test "zg create from-pr fails cleanly when git can't list worktrees" {
+    make_repo
+    stub_gh
+    export GH_HEAD=pr-branch
+    local real_git
+    real_git="$(command -v git)"
+    mkdir -p "$TEST_ROOT/fakegit"
+    printf '#!/bin/sh\n[ "$1 $2" = "worktree list" ] && exit 128\nexec "%s" "$@"\n' "$real_git" > "$TEST_ROOT/fakegit/git"
+    chmod +x "$TEST_ROOT/fakegit/git"
+    PATH="$TEST_ROOT/fakegit:$PATH" run --separate-stderr "$ZG" create from-pr 42
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"Could not list worktrees to look up branch 'pr-branch'"* ]]
     [ ! -e "$REPO/.worktrees" ]
 }

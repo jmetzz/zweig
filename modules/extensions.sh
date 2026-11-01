@@ -48,7 +48,7 @@ zg_extensions_select() {
 zg_extensions_from_pr() {
     local pr_id="${1:-}"
     if [[ -z "$pr_id" ]]; then
-        echo "❌ Error: Missing PR ID"
+        echo "❌ Error: Missing PR ID" >&2
         return 1
     fi
 
@@ -61,45 +61,58 @@ zg_extensions_from_pr() {
     # Worktrees are named pr-<N>-<branch>; the prefix keeps PR 4 from matching pr-42-*.
     local prefix="pr-$pr_id-"
 
-    # Offline fast path: a single pr-<N>-* worktree means this PR was set up
-    # before, so switch to it without asking GitHub. With several (e.g. the PR's
-    # head branch was renamed) let gh decide which one is current.
+    # Offline fast path: a single worktree for this PR (pr-<N>-*, or the bare
+    # <N> older versions used) means it was set up before, so switch to it
+    # without asking GitHub. Only directories with a .git entry count, so a
+    # leftover plain directory is ignored. With several (e.g. the PR's head
+    # branch was renamed) let gh decide which one is current.
     local candidate found="" count=0
-    for candidate in "$ZWEIG_WORKTREE_DIR/$prefix"*; do
-        [[ -d "$candidate" ]] || continue
+    for candidate in "$ZWEIG_WORKTREE_DIR/$pr_id" "$ZWEIG_WORKTREE_DIR/$prefix"*; do
+        [[ -d "$candidate" && -e "$candidate/.git" ]] || continue
         found="$candidate"
         count=$((count + 1))
     done
     if [[ $count -eq 1 ]]; then
         echo "ℹ️ Worktree for PR #$pr_id already exists."
-        zg_core_switch "${found##*/}"
-        return
+        zg_helpers_request_cd "$found" "worktree: ${found##*/}"
+        return $?
+    elif [[ $count -gt 1 ]]; then
+        echo "ℹ️ Several worktrees match PR #$pr_id; asking GitHub for its current branch."
     fi
 
-    # Resolve the PR head branch
-    local branch
-    branch="$(gh pr view "$pr_id" --json headRefName -q .headRefName 2>/dev/null || true)"
+    # Resolve the PR head branch. gh's stderr is kept apart from the branch
+    # name so its reason (logged out, offline, no such PR) can be shown.
+    local branch gh_err gh_reason=""
+    gh_err="$(mktemp "${TMPDIR:-/tmp}/zg-gh.XXXXXX")" || gh_err=/dev/null
+    branch="$(gh pr view "$pr_id" --json headRefName -q .headRefName 2>"$gh_err" || true)"
+    if [[ "$gh_err" != /dev/null ]]; then
+        IFS= read -r gh_reason < "$gh_err" || true
+        rm -f "$gh_err"
+    fi
     if [[ -z "$branch" ]]; then
-        echo "❌ Error: Could not resolve head branch for PR #$pr_id (not found or no access)." >&2
+        echo "❌ Error: Could not resolve head branch for PR #$pr_id: ${gh_reason:-not found or no access}" >&2
         return 1
     fi
 
-    # The branch may already be checked out anywhere (an older "<N>" worktree,
-    # a worktree made by another tool): switch there rather than fail on add.
-    # Switch by the path git reports, not by name: a worktree-dir directory
-    # named like the branch could otherwise shadow it (see docs/adr/0001).
+    # The branch may already be checked out anywhere (a worktree made by
+    # another tool, or one renamed on disk): switch there rather than fail on
+    # add. Switch by the path git reports, not by name: a worktree-dir
+    # directory named like the branch could otherwise shadow it (docs/adr/0001).
     local existing rc=0
     existing="$(zg_helpers_branch_worktree_path "$branch")" || rc=$?
     case $rc in
         0)
-            echo "ℹ️ Branch '$branch' of PR #$pr_id is already checked out in a worktree."
+            # git would refuse to add a second worktree for the branch, so a
+            # registered-but-deleted directory is reported, not recreated.
             if [[ ! -d "$existing" ]]; then
                 zg_helpers_report_worktree_not_found "$branch"
                 return 1
             fi
+            echo "ℹ️ Branch '$branch' of PR #$pr_id is already checked out in a worktree."
             zg_helpers_request_cd "$existing" "worktree: $branch"
-            return ;;
-        2)
+            return $? ;;
+        1) ;; # not checked out anywhere: create the worktree below
+        *)
             echo "❌ Error: Could not list worktrees to look up branch '$branch'." >&2
             return 1 ;;
     esac
@@ -134,5 +147,5 @@ zg_extensions_from_pr() {
     zg_helpers_seed_worktree "$ZWEIG_WORKTREE_DIR/$wt_name" "$root_dir"
 
     echo "✅ Worktree created from PR #$pr_id ($branch)"
-    zg_core_switch "$wt_name"
+    zg_helpers_request_cd "$ZWEIG_WORKTREE_DIR/$wt_name" "worktree: $wt_name"
 }

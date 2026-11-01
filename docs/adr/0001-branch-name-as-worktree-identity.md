@@ -16,7 +16,8 @@ with `<name>` equal to the branch name. Neither holds in practice:
   wherever they choose, under directory names zg doesn't control.
 - zg itself breaks the equality: `zg migrate` flattens `feature/foo` into a
   `feature__foo` directory, and `zg create from-pr` names directories
-  `pr-<N>-<branch>` (older versions used the bare PR number).
+  `pr-<N>-<branch>` with `/` flattened to `-` (older versions used the bare
+  PR number).
 
 Commands that build `$ZWEIG_WORKTREE_DIR/<name>` therefore can't see or act on
 a large class of real worktrees.
