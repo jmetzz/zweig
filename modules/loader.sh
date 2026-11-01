@@ -11,14 +11,33 @@ export ZWEIG_DEFAULT_SYNC_SCOPE="${ZWEIG_DEFAULT_SYNC_SCOPE:-current}"
 # relative to the repo root. Space-separated; override to add or drop entries.
 export ZWEIG_COPY_ON_CREATE="${ZWEIG_COPY_ON_CREATE:-.env .env.local .env.development .env.test .env.production AGENTS.md CLAUDE.md GEMINI.md .claude .cursor .codex .antigravity}"
 
+# Prints the physical git dir that <dir>/.git leads to: a directory, a symlink,
+# or a gitfile ("gitdir: <path>", relative to <dir>). Fails if there is none.
+zg__dot_git_target() {
+  local dir="$1" line target
+  if [[ -d "$dir/.git" ]]; then
+    (cd "$dir/.git" && pwd -P)
+  elif [[ -f "$dir/.git" ]]; then
+    IFS= read -r line <"$dir/.git" || [[ -n "$line" ]] || return 1
+    [[ "$line" == "gitdir: "* ]] || return 1
+    target="${line#gitdir: }"
+    [[ "$target" == /* ]] || target="$dir/$target"
+    (cd "$target" 2>/dev/null && pwd -P)
+  else
+    return 1
+  fi
+}
+
 # --- Resolve the control repo root (works from inside a linked worktree too) ---
 # Uses git-common-dir, which always points at the main repo's git dir, so the same
 # root (and thus the same worktree dir) resolves no matter which worktree, or
 # which subfolder of one, you're in. Prints a physical path.
 # The parent of the git dir is only the root if <parent>/.git really is that git
-# dir. When .git is a symlink, or GIT_DIR points elsewhere, it is not: then the
-# root is the nearest ancestor of the current top level whose .git resolves to
-# the git dir. Git keeps no pointer back to the main checkout, so a linked
+# dir. When .git is a symlink or gitfile (submodule, --separate-git-dir), or
+# GIT_DIR points elsewhere, it is not: then the root is the nearest ancestor of
+# the current top level whose .git (directory, symlink or gitfile) resolves to
+# the git dir. A linked worktree's gitfile points into <git dir>/worktrees, so
+# it never matches. Git keeps no pointer back to the main checkout, so a linked
 # worktree outside the repo can't be resolved.
 # Returns 1 outside a work tree (or in a bare repo), 2 when the root can't be
 # determined reliably (never guesses).
@@ -42,13 +61,13 @@ zg__control_root() {
   candidate="$(dirname "$abs")"
   # A bare main repo has no checkout: its parent directory is the root.
   if [[ "$(git --git-dir="$abs" rev-parse --is-bare-repository 2>/dev/null)" == true ]] \
-    || [[ "$(cd "$candidate/.git" 2>/dev/null && pwd -P)" == "$abs" ]]; then
+    || [[ "$(zg__dot_git_target "$candidate")" == "$abs" ]]; then
     echo "$candidate"
     return 0
   fi
   candidate="$top"
   while :; do
-    if [[ "$(cd "$candidate/.git" 2>/dev/null && pwd -P)" == "$abs" ]]; then
+    if [[ "$(zg__dot_git_target "$candidate")" == "$abs" ]]; then
       echo "$candidate"
       return 0
     fi
@@ -144,8 +163,8 @@ zg() {
        local _zg_root_rc=0
        zg__control_root >/dev/null || _zg_root_rc=$?
        if ((_zg_root_rc == 2)); then
-         echo "❌ Cannot determine the repository root (is GIT_DIR set, or is this a linked worktree of a repo whose .git is a symlink, outside that repo?)." >&2
-         echo "   Run zg from the main checkout, or unset GIT_DIR." >&2
+         echo "❌ Cannot determine the repository root: no directory above here has a .git that leads to this repository's git dir." >&2
+         echo "   Run zg from inside the repository's own work tree (GIT_DIR, or a linked worktree outside the repo, can cause this)." >&2
          return 1
        fi ;;
   esac

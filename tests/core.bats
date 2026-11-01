@@ -1906,3 +1906,25 @@ make_symlinked_git_repo() {
     run "$ZG" help
     [ "$status" -eq 0 ]
 }
+
+@test "zg create works from inside a submodule and uses its own .worktrees" {
+    git init -q -b main "$TEST_ROOT/subsrc"
+    git -C "$TEST_ROOT/subsrc" commit -q --allow-empty -m "chore: init"
+    make_repo
+    git -c protocol.file.allow=always submodule add -q "$TEST_ROOT/subsrc" sub
+    cd "$REPO/sub"
+    run --separate-stderr "$ZG" create foo
+    [ "$status" -eq 0 ]
+    [ -d "$REPO/sub/.worktrees/foo" ]
+    [ ! -e "$REPO/.worktrees" ]
+}
+
+@test "zg create resolves the work tree of a --separate-git-dir repo" {
+    git init -q -b main --separate-git-dir "$TEST_ROOT/sepgit" "$TEST_ROOT/sep"
+    cd "$TEST_ROOT/sep"
+    git commit -q --allow-empty -m "chore: init"
+    run --separate-stderr "$ZG" create foo
+    [ "$status" -eq 0 ]
+    [ -d "$TEST_ROOT/sep/.worktrees/foo" ]
+    [ ! -e "$TEST_ROOT/.worktrees" ]
+}
