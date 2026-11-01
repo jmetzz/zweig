@@ -138,6 +138,12 @@ Here are some examples of conversational API usage:
   zg create from-pr 42
   ```
 
+- Enable the shell shim so commands that move you (`zg cd`/`switch`, `main`, `root`, `select`, `create -s`, `create from-pr`) change your shell's directory. A subprocess can't do that on its own; without the shim these commands print the target path instead. Add to your `.bashrc`/`.zshrc` (or run `install.sh --write-rc`):
+
+  ```bash
+  . "$HOME/.local/share/zweig/shims/shims.sh"
+  ```
+
 - Create a worktree and switch into it in one step (requires the shell shim):
 
   ```bash

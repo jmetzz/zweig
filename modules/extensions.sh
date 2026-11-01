@@ -38,12 +38,10 @@ zg_extensions_select() {
     esac
     [[ -n "$selected" ]] || return 0
 
-    # cd to the picked path rather than zg_core_switch: switch resolves by name,
+    # Use the picked path rather than zg_core_switch: switch resolves by name,
     # which can't reach a detached worktree outside the worktree dir.
-    local dir="${selected#*$'\t'}"
-    cd "$dir" || return
-    echo "📂 Switched to worktree: ${selected%%$'\t'*}"
-    echo "   Path: $dir"
+    local dir="${selected#*$'\t'}" name="${selected%%$'\t'*}"
+    zg_helpers_request_cd "$dir" "worktree: $name"
 }
 
 # --- From GitHub PR (requires gh CLI; loader enforces preconditions) ---
@@ -56,7 +54,7 @@ zg_extensions_from_pr() {
 
     # If a worktree named after the PR ID already exists, just switch to it
     if zg_helpers_worktree_exists "$pr_id"; then
-        echo "ℹ️ Worktree for PR #$pr_id already exists. Switching to it…"
+        echo "ℹ️ Worktree for PR #$pr_id already exists."
         zg_core_switch "$pr_id"
         return 0
     fi

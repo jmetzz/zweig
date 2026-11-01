@@ -1,6 +1,22 @@
 #!/usr/bin/env bash
-# Zweig shell shim - source this file to enable 'zg cd'/'zg switch' and 'zg create -s'
-# in the current shell (a subprocess can't change the parent shell's directory).
+# Zweig shell shim - source this file so zg commands that move you (cd/switch,
+# root, main, select, create -s, create from-pr) change the current shell's
+# directory (a subprocess can't change the parent shell's directory).
+
+# Runs zg with ZG_CD_FILE pointing at a fresh temp file; a command that wants
+# to move the shell writes the target directory there, and we cd to it after a
+# successful run.
+__zg_run() {
+  local cd_file dir rc=0
+  cd_file="$(mktemp "${TMPDIR:-/tmp}/zg-cd.XXXXXX")" || return 1
+  ZG_CD_FILE="$cd_file" command zg "$@" || rc=$?
+  dir="$(cat "$cd_file")"
+  rm -f "$cd_file"
+  if [[ $rc -eq 0 && -n "$dir" ]]; then
+    cd "$dir" || rc=$?
+  fi
+  return $rc
+}
 
 zg() {
   if [[ "$1" == "cd" || "$1" == "switch" ]]; then
@@ -31,7 +47,7 @@ zg() {
       fi
     done
 
-    command zg create "${args[@]}" || return $?
+    __zg_run create "${args[@]}" || return $?
 
     if [[ "$switch_after" == "true" && -n "$target" ]]; then
       local dir
@@ -40,6 +56,6 @@ zg() {
       fi
     fi
   else
-    command zg "$@"
+    __zg_run "$@"
   fi
 }
