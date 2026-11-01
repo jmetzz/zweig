@@ -371,11 +371,40 @@ make_default_branch_worktree() {
 
 @test "zg remove refuses a directory holding the default branch without --force" {
     make_default_branch_worktree
-    run bash -c 'echo y | "$1" remove other' _ "$ZG"
+    run --separate-stderr bash -c 'echo y | "$1" remove other' _ "$ZG"
     [ "$status" -ne 0 ]
-    [[ "$output" == *"'other' holds the default branch 'main'"* ]]
-    [[ "$output" != *"Remove worktree"* ]]
+    [ -z "$output" ]
+    [[ "$stderr" == *"'other' holds the default branch 'main'"* ]]
     [ -d "$REPO/.worktrees/other" ]
+}
+
+@test "zg remove refuses a protected worktree on stderr" {
+    make_repo
+    git worktree add -q "$REPO/.worktrees/keep" -b keep
+    touch "$REPO/.worktrees/keep/.protected"
+    run --separate-stderr bash -c 'echo y | "$1" remove keep' _ "$ZG"
+    [ "$status" -ne 0 ]
+    [ -z "$output" ]
+    [[ "$stderr" == *"'keep' is protected"* ]]
+    [ -d "$REPO/.worktrees/keep" ]
+}
+
+@test "zg remove refuses a worktree whose branch can't be read and leaves it" {
+    make_repo
+    git worktree add -q "$REPO/.worktrees/broken" -b broken
+    echo "gitdir: $TEST_ROOT/nonexistent" > "$REPO/.worktrees/broken/.git"
+    run bash -c 'echo y | "$1" remove broken' _ "$ZG"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"Cannot read the branch"* ]]
+    [ -d "$REPO/.worktrees/broken" ]
+}
+
+@test "zg remove removes a detached worktree without --force" {
+    make_repo
+    git worktree add -q --detach "$REPO/.worktrees/detached"
+    run bash -c 'echo y | "$1" remove detached' _ "$ZG"
+    [ "$status" -eq 0 ]
+    [ ! -e "$REPO/.worktrees/detached" ]
 }
 
 @test "zg rebuild refuses a directory holding the default branch without --force" {
@@ -394,12 +423,23 @@ make_default_branch_worktree() {
     git show-ref --verify --quiet refs/heads/main
 }
 
+@test "zg rebuild --force recreates a directory holding the default branch and keeps the branch" {
+    make_default_branch_worktree
+    touch "$REPO/.worktrees/other/stale-file"
+    run "$ZG" rebuild other --force
+    [ "$status" -eq 0 ]
+    [ ! -e "$REPO/.worktrees/other/stale-file" ]
+    [ "$(git -C "$REPO/.worktrees/other" branch --show-current)" = "main" ]
+    git show-ref --verify --quiet refs/heads/main
+}
+
 # dev is created from main, so main is fully merged and `git branch -d` would
 # delete it.
 @test "zg finalize --force removes a directory holding the default branch but never deletes the branch" {
     make_default_branch_worktree
     run "$ZG" finalize other --force
     [ "$status" -eq 0 ]
+    [[ "$output" == *"Removed worktree 'other'; kept the default branch 'main'"* ]]
     [ ! -e "$REPO/.worktrees/other" ]
     git show-ref --verify --quiet refs/heads/main
 }
@@ -409,7 +449,8 @@ make_default_branch_worktree() {
     git checkout -q -b dev
     run "$ZG" finalize main --force
     [ "$status" -eq 0 ]
-    [[ "$output" == *"Kept the default branch 'main'"* ]]
+    [[ "$output" == *"Nothing to finalize: the default branch 'main' is never deleted"* ]]
+    [[ "$output" != *"Finalized"* ]]
     git show-ref --verify --quiet refs/heads/main
 }
 
@@ -486,6 +527,9 @@ make_repo_with_origin() {
     ! git show-ref --verify --quiet refs/heads/foo
 }
 
+# Regression guard: prune trees already skips the default branch as protected.
+# origin's HEAD moves to dev first so origin will let main be deleted, which
+# leaves the local main tracking a gone upstream.
 @test "zg prune trees --force never deletes the default branch even when its remote is gone" {
     make_repo_with_origin
     git checkout -q -b dev

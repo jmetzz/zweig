@@ -216,7 +216,7 @@ zg_core_remove() {
         return 1
     fi
 
-    # Accept --force in either position (optional; remove this loop if you prefer strict)
+    # Accept --force before or after the worktree name
     if [[ "${2:-}" == "--force" || "${1:-}" == "--force" ]]; then
         force="true"
         # normalize wtree if user wrote: zg remove --force <wtree>
@@ -244,6 +244,8 @@ zg_core_remove() {
 
     if [[ "$force" == "false" ]]; then
         local branch
+        # An unreadable worktree is refused rather than guessed at; git can't
+        # remove one whose .git link is broken either, even with --force.
         branch="$(zg_helpers_worktree_branch "$dir")" || return 1
         zg_helpers_guard_protected "$wtree" "$dir" "$branch" || return 1
     fi
@@ -471,11 +473,18 @@ zg_core_finalize() {
     fi
   fi
 
-  # Delete local branch if present (will fail if not merged—fine). The default
-  # branch is never deleted, not even with --force.
+  # The default branch is never deleted, not even with --force.
   if [[ "$branch" == "$ZWEIG_DEFAULT_BRANCH" ]]; then
-    echo "ℹ️ Kept the default branch '$branch'."
-  elif [[ -n "$branch" ]] && git show-ref --verify --quiet "refs/heads/$branch"; then
+    if [[ -n "$dir" ]]; then
+      echo "✅ Removed worktree '$target'; kept the default branch '$branch'."
+    else
+      echo "ℹ️ Nothing to finalize: the default branch '$branch' is never deleted."
+    fi
+    return 0
+  fi
+
+  # Delete local branch if present (will fail if not merged—fine)
+  if [[ -n "$branch" ]] && git show-ref --verify --quiet "refs/heads/$branch"; then
     git branch -d "$branch" || {
       echo "⚠️ Branch $branch not deleted (not fully merged?)."
       [[ "$force" == "true" ]] && echo "Hint: use 'git branch -D $branch' to force."
