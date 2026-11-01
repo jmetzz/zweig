@@ -1928,3 +1928,125 @@ make_symlinked_git_repo() {
     [ -d "$TEST_ROOT/sep/.worktrees/foo" ]
     [ ! -e "$TEST_ROOT/.worktrees" ]
 }
+
+# Moves the git dir into a directory that is itself called .git-like
+# (store/proj/.git) and symlinks it back as the work tree's .git.
+make_nested_dotgit_repo() {
+    make_repo
+    mkdir -p "$TEST_ROOT/store/proj"
+    mv "$REPO/.git" "$TEST_ROOT/store/proj/.git"
+    ln -s "$TEST_ROOT/store/proj/.git" "$REPO/.git"
+}
+
+@test "zg create uses the work tree when .git is a symlink to a dir named .git elsewhere" {
+    make_nested_dotgit_repo
+    run "$ZG" create foo
+    [ "$status" -eq 0 ]
+    [ -d "$REPO/.worktrees/foo" ]
+    [ ! -e "$TEST_ROOT/store/proj/.worktrees" ]
+}
+
+@test "zg create from a linked worktree uses the work tree when .git is a symlink to a dir named .git elsewhere" {
+    make_nested_dotgit_repo
+    "$ZG" create foo
+    cd "$REPO/.worktrees/foo"
+    run "$ZG" create bar
+    [ "$status" -eq 0 ]
+    [ -d "$REPO/.worktrees/bar" ]
+    [ ! -e "$TEST_ROOT/store/proj/.worktrees" ]
+}
+
+@test "zg refuses from a linked worktree outside a symlinked-.git repo, naming the fix" {
+    make_symlinked_git_repo
+    git worktree add -q -b outside "$TEST_ROOT/elsewhere/outside"
+    cd "$TEST_ROOT/elsewhere/outside"
+    run --separate-stderr "$ZG" create foo
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"Cannot determine the repository root"* ]]
+    [[ "$stderr" == *"ZWEIG_WORKTREE_DIR"* ]]
+    [[ "$stderr" == *"$TEST_ROOT/gitstore"* ]]
+    [ ! -e "$TEST_ROOT/.worktrees" ]
+    [ ! -e "$HOME/.worktrees" ]
+    [ ! -e "$REPO/.worktrees" ]
+    [ ! -e "$TEST_ROOT/elsewhere/outside/.worktrees" ]
+}
+
+@test "an explicit ZWEIG_WORKTREE_DIR lets zg work from a linked worktree outside a symlinked-.git repo" {
+    make_symlinked_git_repo
+    git worktree add -q -b outside "$TEST_ROOT/elsewhere/outside"
+    cd "$TEST_ROOT/elsewhere/outside"
+    export ZWEIG_WORKTREE_DIR="$TEST_ROOT/wt"
+    run "$ZG" create foo
+    [ "$status" -eq 0 ]
+    [ -d "$TEST_ROOT/wt/foo" ]
+}
+
+@test "zg refusal under GIT_DIR names GIT_DIR and GIT_WORK_TREE and exits 1" {
+    make_repo
+    mv "$REPO/.git" "$TEST_ROOT/gitstore"
+    export GIT_DIR="$TEST_ROOT/gitstore"
+    run --separate-stderr "$ZG" create foo
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"GIT_WORK_TREE"* ]]
+    [[ "$stderr" == *"$TEST_ROOT/gitstore"* ]]
+}
+
+@test "zg list refuses and zg version works when the root can't be determined" {
+    make_repo
+    mv "$REPO/.git" "$TEST_ROOT/gitstore"
+    export GIT_DIR="$TEST_ROOT/gitstore"
+    run --separate-stderr "$ZG" list
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"Cannot determine the repository root"* ]]
+    run "$ZG" version
+    [ "$status" -eq 0 ]
+}
+
+@test "zg create uses GIT_WORK_TREE as the root when GIT_DIR is set" {
+    make_repo
+    mv "$REPO/.git" "$TEST_ROOT/gitstore"
+    export GIT_DIR="$TEST_ROOT/gitstore" GIT_WORK_TREE="$REPO"
+    mkdir "$REPO/sub"
+    cd "$REPO/sub"
+    run "$ZG" create foo
+    [ "$status" -eq 0 ]
+    [ -d "$REPO/.worktrees/foo" ]
+    [ ! -e "$REPO/sub/.worktrees" ]
+}
+
+@test "zg create from a linked worktree of a submodule uses the submodule's .worktrees" {
+    git init -q -b main "$TEST_ROOT/subsrc"
+    git -C "$TEST_ROOT/subsrc" commit -q --allow-empty -m "chore: init"
+    make_repo
+    git -c protocol.file.allow=always submodule add -q "$TEST_ROOT/subsrc" sub
+    cd "$REPO/sub"
+    "$ZG" create foo
+    cd "$REPO/sub/.worktrees/foo"
+    run "$ZG" create bar
+    [ "$status" -eq 0 ]
+    [ -d "$REPO/sub/.worktrees/bar" ]
+    [ ! -e "$REPO/.worktrees" ]
+}
+
+@test "zg create from a linked worktree of a --separate-git-dir repo uses the work tree's .worktrees" {
+    git init -q -b main --separate-git-dir "$TEST_ROOT/sepgit" "$TEST_ROOT/sep"
+    cd "$TEST_ROOT/sep"
+    git commit -q --allow-empty -m "chore: init"
+    "$ZG" create foo
+    cd "$TEST_ROOT/sep/.worktrees/foo"
+    run "$ZG" create bar
+    [ "$status" -eq 0 ]
+    [ -d "$TEST_ROOT/sep/.worktrees/bar" ]
+    [ ! -e "$TEST_ROOT/.worktrees" ]
+}
+
+@test "zg create from a linked worktree of a bare repo places worktrees beside the bare repo" {
+    git init -q --bare "$TEST_ROOT/bare.git"
+    git -C "$TEST_ROOT/bare.git" worktree add -q --orphan -b zeta "$TEST_ROOT/a-dir" 2>/dev/null \
+        || skip "git too old for worktree add --orphan"
+    git -C "$TEST_ROOT/a-dir" commit -q --allow-empty -m "chore: init"
+    cd "$TEST_ROOT/a-dir"
+    run "$ZG" create foo
+    [ "$status" -eq 0 ]
+    [ -d "$TEST_ROOT/.worktrees/foo" ]
+}

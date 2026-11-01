@@ -4,7 +4,8 @@
 # Requires: bash 4.3+ (namerefs: zg_helpers_split_worktree_line,
 # zg_helpers_load_worktrees, zg_helpers_load_report_worktrees,
 # zg_helpers_report_mark). zg_helpers_load_report_worktrees also calls
-# zg__control_root from loader.sh.
+# zg__control_root from loader.sh (rc 1: not in a work tree; rc 2: root unknown;
+# the dispatcher has already refused rc 2 unless ZWEIG_WORKTREE_DIR is set).
 
 set -u
 

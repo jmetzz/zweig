@@ -11,14 +11,23 @@ export ZWEIG_DEFAULT_SYNC_SCOPE="${ZWEIG_DEFAULT_SYNC_SCOPE:-current}"
 # relative to the repo root. Space-separated; override to add or drop entries.
 export ZWEIG_COPY_ON_CREATE="${ZWEIG_COPY_ON_CREATE:-.env .env.local .env.development .env.test .env.production AGENTS.md CLAUDE.md GEMINI.md .claude .cursor .codex .antigravity}"
 
+# Return codes of zg__control_root.
+# (Guarded: re-sourcing the loader in one shell must not hit a readonly error.)
+if [[ -z "${ZG_ROOT_NOT_IN_TREE:-}" ]]; then
+  readonly ZG_ROOT_NOT_IN_TREE=1   # not in a work tree (e.g. inside a bare repo's git dir)
+  readonly ZG_ROOT_UNKNOWN=2       # in a work tree, but the root can't be determined
+fi
+
 # Prints the physical git dir that <dir>/.git leads to: a directory, a symlink,
-# or a gitfile ("gitdir: <path>", relative to <dir>). Fails if there is none.
+# or a gitfile ("gitdir: <path>", relative to <dir>). Fails when <dir>/.git is
+# missing, is a file that isn't a gitfile, or leads nowhere.
 zg__dot_git_target() {
   local dir="$1" line target
   if [[ -d "$dir/.git" ]]; then
     (cd "$dir/.git" && pwd -P)
   elif [[ -f "$dir/.git" ]]; then
     IFS= read -r line <"$dir/.git" || [[ -n "$line" ]] || return 1
+    line="${line%"${line##*[![:space:]]}"}"   # trailing \r / whitespace
     [[ "$line" == "gitdir: "* ]] || return 1
     target="${line#gitdir: }"
     [[ "$target" == /* ]] || target="$dir/$target"
@@ -28,58 +37,73 @@ zg__dot_git_target() {
   fi
 }
 
-# --- Resolve the control repo root (works from inside a linked worktree too) ---
-# Uses git-common-dir, which always points at the main repo's git dir, so the same
-# root (and thus the same worktree dir) resolves no matter which worktree, or
-# which subfolder of one, you're in. Prints a physical path.
-# The parent of the git dir is only the root if <parent>/.git really is that git
-# dir. When .git is a symlink or gitfile (submodule, --separate-git-dir), or
-# GIT_DIR points elsewhere, it is not: then the root is the nearest ancestor of
-# the current top level whose .git (directory, symlink or gitfile) resolves to
-# the git dir. A linked worktree's gitfile points into <git dir>/worktrees, so
-# it never matches. Git keeps no pointer back to the main checkout, so a linked
-# worktree outside the repo can't be resolved.
-# Returns 1 outside a work tree (or in a bare repo), 2 when the root can't be
-# determined reliably (never guesses).
+# --- Resolve the control repo root ---
+# Prints a physical path. The same root (and thus the same worktree dir)
+# resolves from the main checkout, any subfolder of it, or a linked worktree
+# that lives inside the repo. In order:
+#   1. GIT_WORK_TREE set: that work tree is the root (git's own top level).
+#   2. The nearest directory, from the current top level upwards (inclusive),
+#      whose .git (directory, symlink or gitfile: submodule, --separate-git-dir)
+#      resolves to the repo's git dir. A linked worktree's gitfile points into
+#      <git dir>/worktrees, so it never matches and the walk continues.
+#   3. The parent of the git dir, if <parent>/.git is that git dir, or if the
+#      main repo is bare (a bare main repo has no checkout; its parent is the
+#      root for its linked worktrees). This is what resolves a linked worktree
+#      outside a normal repo.
+# Git keeps no pointer back to the main checkout, so a linked worktree outside
+# a repo whose .git is a symlink or gitfile can't be resolved. Known residual:
+# if that repo's git dir itself sits in a directory named .git elsewhere, step 3
+# picks that directory's parent.
+# Returns ZG_ROOT_NOT_IN_TREE outside a work tree, ZG_ROOT_UNKNOWN when none of
+# the above finds a root. It never guesses.
 zg__control_root() {
-  local git_common_dir abs top candidate
-  git_common_dir="$(git rev-parse --git-common-dir 2>/dev/null)" || return 1
+  local common_dir git_dir top_raw work_top dir
+  common_dir="$(git rev-parse --git-common-dir 2>/dev/null)" || return "$ZG_ROOT_NOT_IN_TREE"
   # Only inside a work tree (not a bare repo's git dir).
-  top="$(git rev-parse --show-toplevel 2>/dev/null)" || return 1
-  if [[ "$git_common_dir" == /* ]]; then
-    abs="$git_common_dir"
-  else
+  top_raw="$(git rev-parse --show-toplevel 2>/dev/null)" || return "$ZG_ROOT_NOT_IN_TREE"
+  if [[ "$common_dir" != /* ]]; then
     # A relative git-common-dir (e.g. "../.git" from a subfolder of the main
     # checkout) is relative to the current directory, not the top level.
-    abs="$(pwd -P)/$git_common_dir"
+    common_dir="$(pwd -P)/$common_dir"
   fi
   # pwd -P resolves symlinks, so symlinked prefixes (macOS /var) can't give one
   # repo two roots.
-  abs="$(cd "$abs" 2>/dev/null && pwd -P)" || return 2
-  top="$(cd "$top" 2>/dev/null && pwd -P)" || return 2
+  git_dir="$(cd "$common_dir" 2>/dev/null && pwd -P)" || return "$ZG_ROOT_UNKNOWN"
+  work_top="$(cd "$top_raw" 2>/dev/null && pwd -P)" || return "$ZG_ROOT_UNKNOWN"
 
-  candidate="$(dirname "$abs")"
-  # A bare main repo has no checkout: its parent directory is the root.
-  if [[ "$(git --git-dir="$abs" rev-parse --is-bare-repository 2>/dev/null)" == true ]] \
-    || [[ "$(zg__dot_git_target "$candidate")" == "$abs" ]]; then
-    echo "$candidate"
+  if [[ -n "${GIT_WORK_TREE:-}" ]]; then
+    echo "$work_top"
     return 0
   fi
-  candidate="$top"
+  dir="$work_top"
   while :; do
-    if [[ "$(zg__dot_git_target "$candidate")" == "$abs" ]]; then
-      echo "$candidate"
+    if [[ "$(zg__dot_git_target "$dir")" == "$git_dir" ]]; then
+      echo "$dir"
       return 0
     fi
-    [[ "$candidate" != / ]] || return 2
-    candidate="$(dirname "$candidate")"
+    [[ "$dir" != / ]] || break
+    dir="$(dirname "$dir")"
   done
+  dir="$(dirname "$git_dir")"
+  if [[ "$(git --git-dir="$git_dir" rev-parse --is-bare-repository 2>/dev/null)" == true ]] \
+    || [[ "$(zg__dot_git_target "$dir")" == "$git_dir" ]]; then
+    echo "$dir"
+    return 0
+  fi
+  return "$ZG_ROOT_UNKNOWN"
 }
 
 # --- Worktree directory: repo-local by default, override wins, $HOME as last resort ---
-if [[ -n "${ZWEIG_WORKTREE_DIR:-}" ]]; then
+# The root is resolved once here; the dispatcher reuses the result while the
+# working directory is unchanged (a sourced loader can outlive a `cd`).
+_zg_wt_dir_explicit=0
+[[ -z "${ZWEIG_WORKTREE_DIR:-}" ]] || _zg_wt_dir_explicit=1
+_zg_root_rc=0
+_zg_control_root="$(zg__control_root)" || _zg_root_rc=$?
+_zg_root_pwd="$PWD"
+if ((_zg_wt_dir_explicit)); then
   : # explicit override wins
-elif _zg_control_root="$(zg__control_root 2>/dev/null)"; then
+elif ((_zg_root_rc == 0)); then
   ZWEIG_WORKTREE_DIR="$_zg_control_root/.worktrees"
 else
   ZWEIG_WORKTREE_DIR="$HOME/.worktrees"
@@ -158,14 +182,29 @@ zg() {
     *) if ! zg_helpers_inside_git_repo; then
          echo "❌ Not inside a Git repository"; return 1
        fi
-       # Refuse rather than put worktrees in a wrong place (rc 1 = bare repo,
-       # handled by each command's own fallback).
-       local _zg_root_rc=0
-       zg__control_root >/dev/null || _zg_root_rc=$?
-       if ((_zg_root_rc == 2)); then
-         echo "❌ Cannot determine the repository root: no directory above here has a .git that leads to this repository's git dir." >&2
-         echo "   Run zg from inside the repository's own work tree (GIT_DIR, or a linked worktree outside the repo, can cause this)." >&2
-         return 1
+       # Refuse rather than put worktrees in a wrong place. Not needed with an
+       # explicit ZWEIG_WORKTREE_DIR. ZG_ROOT_NOT_IN_TREE (a bare repo's git
+       # dir) is left to each command, which falls back to its own top level.
+       if ((! _zg_wt_dir_explicit)); then
+         local root_rc
+         if [[ "$_zg_root_pwd" == "$PWD" ]]; then
+           root_rc="$_zg_root_rc"
+         else
+           root_rc=0
+           zg__control_root >/dev/null || root_rc=$?
+         fi
+         if ((root_rc == ZG_ROOT_UNKNOWN)); then
+           echo "❌ Cannot determine the repository root." >&2
+           echo "   git dir:   $(git rev-parse --git-common-dir 2>/dev/null)" >&2
+           echo "   work tree: $(git rev-parse --show-toplevel 2>/dev/null)" >&2
+           if [[ -n "${GIT_DIR:-}" ]]; then
+             echo "   GIT_DIR is set: unset it, or also set GIT_WORK_TREE." >&2
+           else
+             echo "   No directory from the work tree upwards has a .git that leads to that git dir." >&2
+             echo "   Run zg from the main checkout, or set ZWEIG_WORKTREE_DIR." >&2
+           fi
+           return 1
+         fi
        fi ;;
   esac
 
