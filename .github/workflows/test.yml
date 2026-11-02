@@ -21,6 +21,7 @@ jobs:
           submodules: true
       - run: make test
 
+  # tests/docker_bash43.sh exports ZG_REQUIRE_PTY=1 inside the container.
   bats-bash43:
     runs-on: ubuntu-latest
     timeout-minutes: 15
