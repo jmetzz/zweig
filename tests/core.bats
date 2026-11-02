@@ -471,18 +471,31 @@ make_default_branch_worktree() {
 # that wrongly prompts would show "(y/N)" and "Operation cancelled.". The pty is
 # widened so long paths do not wrap. util-linux script takes the command as a
 # string and needs -e for the child's exit status; BSD script takes it as args.
-# Any other script (e.g. busybox) is not supported: skip rather than fail.
+# Any other script (e.g. busybox) is unsupported: skip, or fail when
+# ZG_REQUIRE_PTY=1 (CI) so these tests can't silently stop running.
 run_finalize_pty() {
-    local inner
-    command -v script >/dev/null 2>&1 || skip "no script(1) to provide a pty"
+    local inner os
+    if ! command -v script >/dev/null 2>&1; then
+        pty_unavailable "no script(1) to provide a pty"
+        return
+    fi
     inner="stty cols 1000; exec $(printf '%q finalize %q' "$ZG" "$1")"
+    os="$(uname -s)"
     if script --version 2>&1 | grep -q util-linux; then
         run bash -c 'printf n | script -qec "$1" /dev/null' _ "bash -c $(printf '%q' "$inner")"
-    elif [[ "$(uname -s)" == Darwin || "$(uname -s)" == *BSD ]]; then
+    elif [[ "$os" == Darwin || "$os" == *BSD ]]; then
         run bash -c 'printf n | script -q /dev/null bash -c "$1"' _ "$inner"
     else
-        skip "script(1) is neither util-linux nor BSD"
+        pty_unavailable "script(1) is neither util-linux nor BSD"
     fi
+}
+
+pty_unavailable() {
+    if [[ "${ZG_REQUIRE_PTY:-}" == 1 ]]; then
+        echo "$1" >&2
+        return 1
+    fi
+    skip "$1"
 }
 
 @test "zg finalize --force of the default branch needs no reachable origin" {
@@ -1259,6 +1272,7 @@ STUB
     [[ "$output" == *"Directory already exists, not migrating loose: "*"/.worktrees/loose"* ]]
 }
 
+# Only runs where /bin/bash is older than 4.3 (macOS); CI skips it.
 @test "zg refuses to run on bash older than 4.3" {
     [ -x /bin/bash ] || skip "no /bin/bash"
     if /bin/bash -c '(( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 3) ))'; then

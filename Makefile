@@ -55,25 +55,11 @@ install_deps: check-basher ## Install basher deps from ./deps
 test: ## Run test suite
 	@./tests/run_tests.sh
 
-# Runs the suite on the declared minimum bash (4.3). Bats comes from the
-# vendored submodule (copied along with the repo): CI checks it out, and a
-# missing one fails here with the same hint as run_tests.sh, rather than
-# installing a different bats version in the container.
+# Runs the suite on the declared minimum bash (4.3), with the vendored bats
+# copied into the container along with the repo.
 test-bash43: check-docker ## Run test suite on bash 4.3 (docker)
-	@if [ ! -x tests/bats-core/bin/bats ]; then \
-		echo "Error: tests/bats-core/bin/bats not found; the container uses the vendored bats."; \
-		echo "  Get it: git submodule update --init tests/bats-core"; \
-		exit 1; \
-	fi
-	@docker run --rm -v "$(CURDIR)":/src:ro bash:4.3 bash -c '\
-		set -e; \
-		apk add -q git util-linux-misc; \
-		git config --global user.email t@t; \
-		git config --global user.name t; \
-		git config --global init.defaultBranch main; \
-		cp -r /src /work; \
-		cd /work; \
-		./tests/run_tests.sh'
+	@[ -x tests/bats-core/bin/bats ] || { echo "Error: vendored bats missing (stops before docker): git submodule update --init tests/bats-core" >&2; exit 1; }
+	@docker run --rm -v "$(CURDIR)":/src:ro bash:4.3 /src/tests/docker_bash43.sh
 
 smoke: ## Run smoke tests
 	bash tests/smoke.sh
