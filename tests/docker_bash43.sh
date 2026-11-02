@@ -7,10 +7,11 @@ set -euo pipefail
 apk add git util-linux-misc
 
 # /src is read-only and the tests write next to themselves: work on a copy.
-# .worktrees is skipped: it can hold many full checkouts.
+# .git and .worktrees are skipped: the suite builds its own repos, and
+# .worktrees can hold many full checkouts.
 mkdir /work
 for entry in /src/* /src/.[!.]*; do
-    [[ "${entry##*/}" == .worktrees ]] || cp -R "$entry" /work/
+    [[ "${entry##*/}" == .git || "${entry##*/}" == .worktrees ]] || cp -R "$entry" /work/
 done
 cd /work
 
