@@ -21,8 +21,9 @@ setup() {
     BASHER="$HOME/.basher/cellar/bin/bats"
 
     # A PATH holding only the external commands the runner uses (find, dirname),
-    # so no system bats is reachable. The runner is started with an absolute
-    # /bin/bash, so its #!/usr/bin/env shebang doesn't need env or bash on it.
+    # so no system bats is reachable. The runner is started with "$BASH" (the
+    # bash running bats: /bin/bash is missing or 3.2 on some systems), so its
+    # #!/usr/bin/env shebang doesn't need env or bash on the restricted PATH.
     TOOLS="$TEST_ROOT/tools"
     mkdir -p "$TOOLS"
     for tool in find dirname; do
@@ -47,11 +48,11 @@ run_runner() {
     local path="$TOOLS"
     local dir
     for dir in "$@"; do path="$dir:$path"; done
-    run --separate-stderr env PATH="$path" /bin/bash "$RUNNER"
+    run --separate-stderr env PATH="$path" "$BASH" "$RUNNER"
 }
 
 @test "the restricted PATH has no bats on it" {
-    run env PATH="$TOOLS" /bin/bash -c 'command -v bats'
+    run env PATH="$TOOLS" "$BASH" -c 'command -v bats'
     [ "$status" -ne 0 ]
 }
 

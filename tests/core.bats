@@ -471,13 +471,17 @@ make_default_branch_worktree() {
 # that wrongly prompts would show "(y/N)" and "Operation cancelled.". The pty is
 # widened so long paths do not wrap. util-linux script takes the command as a
 # string and needs -e for the child's exit status; BSD script takes it as args.
+# Any other script (e.g. busybox) is not supported: skip rather than fail.
 run_finalize_pty() {
     local inner
+    command -v script >/dev/null 2>&1 || skip "no script(1) to provide a pty"
     inner="stty cols 1000; exec $(printf '%q finalize %q' "$ZG" "$1")"
-    if script --version >/dev/null 2>&1; then
+    if script --version 2>&1 | grep -q util-linux; then
         run bash -c 'printf n | script -qec "$1" /dev/null' _ "bash -c $(printf '%q' "$inner")"
-    else
+    elif [[ "$(uname -s)" == Darwin || "$(uname -s)" == *BSD ]]; then
         run bash -c 'printf n | script -q /dev/null bash -c "$1"' _ "$inner"
+    else
+        skip "script(1) is neither util-linux nor BSD"
     fi
 }
 
