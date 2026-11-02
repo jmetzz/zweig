@@ -112,6 +112,7 @@ Automated tests live in `tests/*.bats` and run against the real `bin/zg` in a di
 
 * `make test` runs the `bats` suite via `tests/run_tests.sh` and does not require `basher`. The script's header lists where it looks for `bats`.
 * No `bats` yet? Fetch the vendored copy with `git submodule update --init tests/bats-core`.
+* `make test-bash43` runs the suite in Docker on `bash:4.3`, the declared minimum (needs docker and the vendored bats). CI runs both `make test` and `make test-bash43` (`.github/workflows/test.yml`).
 * `make smoke` runs `tests/smoke.sh`, a secondary manual check that expects `zg` on `PATH`.
 
 Add a bats test for every behavior change; anything not covered still needs manual testing.
