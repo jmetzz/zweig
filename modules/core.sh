@@ -372,6 +372,7 @@ zg_core_remove_merged() {
             if zg_core_finalize "$branch" --force; then
                 removed=$((removed + 1))
             else
+                # Relies on git's and finalize's messages having been printed above.
                 echo "❌ Could not fully finalize $branch (see above)" >&2
                 failed=$((failed + 1))
             fi
@@ -431,6 +432,7 @@ zg_core_rebuild() {
 
 # --- Finalize branch after merge ---
 zg_core_finalize() {
+  # ${1:-}: under set -u a bare $1 would abort before the missing-name message.
   local target="${1:-}"
   local force="false"
 
@@ -517,13 +519,15 @@ zg_core_finalize() {
   fi
 
   if [[ "$delete_branch" == "true" ]]; then
-    # git refuses when the branch is not fully merged. The worktree is already
-    # gone, so report a partial finalize and fail rather than claim success.
+    # git may refuse for more than one reason (not fully merged, checked out in
+    # another worktree, ...) and prints its own error first. Any worktree was
+    # removed above, so report a partial finalize and fail rather than claim
+    # success.
     if ! git branch -d "$branch"; then
       if [[ -n "$dir" ]]; then
-        echo "⚠️ Removed worktree '$target' but kept branch '$branch': not fully merged. Delete it with: git branch -D $branch" >&2
+        echo "⚠️ Removed worktree '$target' but kept branch '$branch': git refused to delete it (see above). If it is only unmerged: git branch -D $branch" >&2
       else
-        echo "⚠️ Kept branch '$branch': not fully merged. Delete it with: git branch -D $branch" >&2
+        echo "⚠️ Kept branch '$branch': git refused to delete it (see above). If it is only unmerged: git branch -D $branch" >&2
       fi
       return 1
     fi
