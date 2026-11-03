@@ -2346,7 +2346,7 @@ make_worktree_with_submodule() {
     [ "$status" -eq 1 ]
     [ ! -e "$REPO/.worktrees/wip" ]
     git show-ref --verify --quiet refs/heads/wip
-    [[ "$stderr" == *"kept branch 'wip'"* ]]
+    [[ "$stderr" == *"Removed worktree 'wip' but kept branch 'wip'"* ]]
     [[ "$stderr" == *"git branch -D wip"* ]]
     [[ "$output" != *"Finalized"* ]]
     [[ "$stderr" != *"Finalized"* ]]
@@ -2360,12 +2360,14 @@ make_worktree_with_submodule() {
     run --separate-stderr "$ZG" finalize wip --force
     [ "$status" -eq 1 ]
     git show-ref --verify --quiet refs/heads/wip
-    [[ "$stderr" == *"branch 'wip'"* ]]
+    # git's own error comes first; our line must start with "Kept branch".
+    printf '%s\n' "$stderr" | grep -q "^⚠️ Kept branch 'wip'"
+    [[ "$stderr" != *"Removed worktree"* ]]
     [[ "$stderr" == *"git branch -D wip"* ]]
     [[ "$output" != *"Finalized"* ]]
 }
 
-@test "zg remove merged does not count a branch finalize had to keep" {
+@test "zg remove merged counts a branch finalize had to keep as failed" {
     make_repo_with_origin
     git worktree add -q -b pushed "$REPO/.worktrees/pushed"
     git -C "$REPO/.worktrees/pushed" commit -q --allow-empty -m "feat: on origin only"
@@ -2376,6 +2378,7 @@ make_worktree_with_submodule() {
     [[ "$output" == *"removed: 0"* ]]
     [[ "$output" == *"failed: 1"* ]]
     [[ "$stderr" == *"git branch -D pushed"* ]]
+    [[ "$stderr" == *"Could not fully finalize pushed"* ]]
     git show-ref --verify --quiet refs/heads/pushed
 }
 
