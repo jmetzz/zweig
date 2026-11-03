@@ -2336,3 +2336,53 @@ make_worktree_with_submodule() {
     [ -d "$TEST_ROOT/wt-sm/sub" ]
     git show-ref --verify --quiet refs/heads/sm
 }
+
+# #46: finalize must not claim success when the branch survives.
+@test "zg finalize --force fails and says so when it can't delete an unmerged branch" {
+    make_repo
+    git worktree add -q -b wip "$REPO/.worktrees/wip"
+    git -C "$REPO/.worktrees/wip" commit -q --allow-empty -m "feat: unmerged"
+    run --separate-stderr "$ZG" finalize wip --force
+    [ "$status" -eq 1 ]
+    [ ! -e "$REPO/.worktrees/wip" ]
+    git show-ref --verify --quiet refs/heads/wip
+    [[ "$stderr" == *"kept branch 'wip'"* ]]
+    [[ "$stderr" == *"git branch -D wip"* ]]
+    [[ "$output" != *"Finalized"* ]]
+    [[ "$stderr" != *"Finalized"* ]]
+}
+
+@test "zg finalize of an unmerged branch with no worktree fails and keeps it" {
+    make_repo
+    git checkout -q -b wip
+    git commit -q --allow-empty -m "feat: unmerged"
+    git checkout -q main
+    run --separate-stderr "$ZG" finalize wip --force
+    [ "$status" -eq 1 ]
+    git show-ref --verify --quiet refs/heads/wip
+    [[ "$stderr" == *"branch 'wip'"* ]]
+    [[ "$stderr" == *"git branch -D wip"* ]]
+    [[ "$output" != *"Finalized"* ]]
+}
+
+@test "zg remove merged does not count a branch finalize had to keep" {
+    make_repo_with_origin
+    git worktree add -q -b pushed "$REPO/.worktrees/pushed"
+    git -C "$REPO/.worktrees/pushed" commit -q --allow-empty -m "feat: on origin only"
+    # In origin/main but not in local main, and no upstream: -d refuses.
+    git push -q origin pushed:main
+    run --separate-stderr "$ZG" remove merged --force
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"removed: 0"* ]]
+    [[ "$output" == *"failed: 1"* ]]
+    [[ "$stderr" == *"git branch -D pushed"* ]]
+    git show-ref --verify --quiet refs/heads/pushed
+}
+
+@test "zg finalize without a name reports the error on stderr only" {
+    make_repo
+    run --separate-stderr "$ZG" finalize
+    [ "$status" -eq 1 ]
+    [ -z "$output" ]
+    [[ "$stderr" == *"Missing branch name"* ]]
+}
