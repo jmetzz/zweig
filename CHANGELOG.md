@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/jmetzz/zweig/compare/v1.0.0...v1.0.1) (2026-11-03)
+
+
+### Bug Fixes
+
+* **ci:** let the release workflow comment on issues and PRs ([2a05495](https://github.com/jmetzz/zweig/commit/2a05495b248b16c56e0d565758e834ccc894d816))
+
 # 1.0.0 (2026-11-03)
 
 
