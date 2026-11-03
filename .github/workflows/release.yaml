@@ -5,6 +5,8 @@ on:
 
 permissions:
   contents: write # needed to create releases and commit changelog
+  issues: write # comment on released issues; open an issue when a release fails
+  pull-requests: write # comment on released PRs
 
 jobs:
   release:
