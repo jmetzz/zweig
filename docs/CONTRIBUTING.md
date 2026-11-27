@@ -1,15 +1,18 @@
 # Contributing to zweig
 
+Zweig is a personal project maintained on a best-effort basis. Issues and pull
+requests are welcome, but they may not be triaged quickly. To report a security
+problem, see [SECURITY.md](../SECURITY.md).
+
 ## Project structure
 
 The `zweig` CLI is organized into modular Bash scripts.
 
 * `bin/zg`: The main entrypoint for the CLI.
 * `modules/loader.sh`: Dispatches commands to the appropriate module functions.
-* `modules/core.sh`: Contains core worktree management commands.
-* `modules/lifecycle.sh`: Manages the lifecycle of worktrees (finalization, protection, rebuilding).
-* `modules/maintenance.sh`: Provides maintenance commands (pruning, syncing, migration).
-* `modules/meta.sh`: Includes meta commands like help and version.
+* `modules/core.sh`: Contains the worktree management and lifecycle commands (create, remove, switch, list, finalize, rebuild).
+* `modules/maintenance.sh`: Provides maintenance commands (pruning, syncing, status, migration, protect).
+* `modules/helpers.sh`: Shared helpers, plus the `help` and `version` commands.
 * `modules/extensions.sh`: Houses optional commands that require external tools.
 
 For a detailed list of commands and their usage, run `zg help`.
