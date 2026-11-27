@@ -14,7 +14,7 @@ Git worktrees are a powerful but underutilized feature that allows multiple work
 * **Avoid destructive mistakes** (accidental deletion, branch loss, etc.).
 * **Enable automation-safe scripting** (clean exit codes, guarded deletes).
 * **Encourage trunk-based workflows** with easy branch+worktree handling.
-* **Support full lifecycle operations** (create, archive, finalize, rebuild, sync).
+* **Support full lifecycle operations** (create, finalize, rebuild, sync).
 * **Design with extensibility** in mind (modules, plugins, integrations).
 
 ---
@@ -35,7 +35,7 @@ Git worktrees are a powerful but underutilized feature that allows multiple work
 The CLI was designed and built from scratch, starting with a fully modular architecture:
 
 * A **dispatcher** (`zg`) routes all subcommands.
-* **Modules** (`core`, `lifecycle`, `maintenance`, `meta`) encapsulate logic.
+* **Modules** (`helpers`, `core`, `maintenance`, `extensions`) encapsulate logic.
 * A **loader** detects optional extensions (`gh`, `fzf`, etc.) automatically.
 * Safety layers were added to every destructive command (`finalize`, `remove`, etc.).
 * A **GitHub installer** script enables one-line installation across environments.

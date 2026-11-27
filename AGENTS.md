@@ -1,4 +1,4 @@
-# zweig - Gemini Development Context
+# zweig - Development Context
 
 This document provides development context for the `zweig` project, a command-line interface for managing `git worktree`.
 
@@ -136,16 +136,21 @@ Releases are fully automated using `semantic-release`. When a pull request is me
 │   ├── CONTRIBUTING.md # Contribution guidelines
 │   └── description.md  # Detailed project description
 ├── modules
-│   ├── core.sh         # Core commands (create, from, remove, switch, list)
+│   ├── core.sh         # Core commands (create, remove, switch, list, finalize, rebuild)
 │   ├── extensions.sh   # Optional extensions (e.g., fzf, gh)
-│   ├── lifecycle.sh    # Lifecycle commands (finalize, archive, rebuild, protect, unprotect)
+│   ├── helpers.sh      # Shared helpers, plus help and version
 │   ├── loader.sh       # Loads all modules and dispatches commands
-│   ├── maintenance.sh  # Maintenance commands (prune, sync, etc.)
-│   └── meta.sh         # Meta commands (help, version)
+│   └── maintenance.sh  # Maintenance commands (prune, sync, status, migrate, protect)
+├── shims
+│   └── shims.sh        # Shell shim so zg can change the shell's directory
+├── tests
+│   └── *.bats          # bats test suite (bats-core vendored as a submodule)
 ├── .github
 │   └── workflows
+│       ├── commitlint.yml  # GitHub Action for commit message checks
 │       ├── lint.yml        # GitHub Action for linting
-│       └── release.yaml    # GitHub Action for releases
+│       ├── release.yaml    # GitHub Action for releases
+│       └── test.yml        # GitHub Action for tests
 ├── install.sh          # Installation script
 ├── package.json        # Defines dev dependencies for semantic-release
 └── README.md           # Project README
