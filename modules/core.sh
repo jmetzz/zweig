@@ -397,7 +397,11 @@ zg_core_remove_merged() {
         fi
     done
 
-    echo "✅ remove-merged complete — removed: $removed, skipped: $skipped, failed: $failed"
+    if [[ $failed -eq 0 ]]; then
+        echo "✅ remove-merged complete — removed: $removed, skipped: $skipped, failed: $failed"
+    else
+        echo "⚠️ remove-merged finished with failures — removed: $removed, skipped: $skipped, failed: $failed" >&2
+    fi
     [[ $rc -ne 2 ]] || echo "⚠️ Worktrees with a missing directory were not checked (see warnings above)." >&2
     [[ $failed -eq 0 ]] || return 1
 }
