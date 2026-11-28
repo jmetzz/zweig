@@ -874,6 +874,22 @@ make_repo_with_origin() {
     ! git show-ref --verify --quiet refs/heads/ext
 }
 
+@test "zg prune trees without --force exits non-zero and warns on stderr when it keeps an unmerged branch" {
+    make_repo_with_origin
+    git worktree add -q -b ext "$TEST_ROOT/outside"
+    git -C "$TEST_ROOT/outside" commit -q --allow-empty -m "feat: unmerged work"
+    git push -q -u origin ext
+    git push -q origin --delete ext
+    run --separate-stderr bash -c 'echo y | "$1" prune trees' _ "$ZG"
+    [ "$status" -ne 0 ]
+    [[ "$stderr" == *"Could not delete local branch 'ext'"* ]]
+    [[ "$stderr" == *"--force"* ]]
+    [[ "$output" != *"Could not delete local branch"* ]]
+    # The worktree is gone, the unmerged branch is kept.
+    [ ! -e "$TEST_ROOT/outside" ]
+    git show-ref --verify --quiet refs/heads/ext
+}
+
 @test "zg prune trees fails on a locked worktree but still prunes the others" {
     make_repo_with_origin
     git worktree add -q -b ext "$TEST_ROOT/outside"

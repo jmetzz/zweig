@@ -141,7 +141,8 @@ zg_maintenance_prune_trees() {
                         failed=1
                     fi
                 else
-                    echo "⚠️ Could not delete local branch '$branch' (not fully merged?). Use --force to override."
+                    echo "⚠️ Could not delete local branch '$branch' (not fully merged?). Use --force to override." >&2
+                    failed=1
                 fi
             fi
         fi
