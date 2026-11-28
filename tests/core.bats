@@ -2444,8 +2444,10 @@ make_worktree_with_submodule() {
     git push -q origin pushed:main
     run --separate-stderr "$ZG" remove merged --force
     [ "$status" -eq 1 ]
-    [[ "$output" == *"removed: 0"* ]]
-    [[ "$output" == *"failed: 1"* ]]
+    [[ "$stderr" == *"⚠️ remove-merged finished with failures"* ]]
+    [[ "$stderr" == *"removed: 0"* ]]
+    [[ "$stderr" == *"failed: 1"* ]]
+    [[ "$output" != *"✅"* ]]
     [[ "$stderr" == *"git branch -D pushed"* ]]
     [[ "$stderr" == *"Could not fully finalize pushed"* ]]
     git show-ref --verify --quiet refs/heads/pushed
