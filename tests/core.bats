@@ -1964,6 +1964,75 @@ STUB
     git show-ref --verify --quiet refs/heads/done
 }
 
+@test "zg remove merged does not prompt and exits 0 when nothing is merged" {
+    make_repo_with_origin
+    git worktree add -q -b wip "$TEST_ROOT/elsewhere/wip"
+    ( cd "$TEST_ROOT/elsewhere/wip" && git commit -q --allow-empty -m wip )
+    run bash -c '"$1" remove merged </dev/null' _ "$ZG"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"Operation cancelled."* ]]
+    [[ "$output" == *"nothing to remove"* ]]
+    [ -d "$TEST_ROOT/elsewhere/wip" ]
+}
+
+@test "zg remove merged lists the merged worktrees, then removes them when confirmed" {
+    make_repo_with_origin
+    git worktree add -q -b done "$TEST_ROOT/elsewhere/done"
+    run bash -c 'echo y | "$1" remove merged' _ "$ZG"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"merged into origin/"* ]]
+    [[ "$output" == *"  done"* ]]
+    [ ! -e "$TEST_ROOT/elsewhere/done" ]
+}
+
+@test "zg remove merged does not prompt when the only merged worktree is protected" {
+    make_repo_with_origin
+    git worktree add -q -b done "$TEST_ROOT/elsewhere/done"
+    "$ZG" protect done >/dev/null
+    run bash -c '"$1" remove merged </dev/null' _ "$ZG"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"nothing to remove"* ]]
+    [ -d "$TEST_ROOT/elsewhere/done" ]
+}
+
+@test "zg remove merged does not prompt when the only other worktree is detached" {
+    make_repo_with_origin
+    git worktree add -q --detach "$TEST_ROOT/elsewhere/det"
+    run bash -c '"$1" remove merged </dev/null' _ "$ZG"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"nothing to remove"* ]]
+    [ -d "$TEST_ROOT/elsewhere/det" ]
+}
+
+@test "zg remove merged warns on stderr about a missing directory when nothing is merged" {
+    make_repo_with_origin
+    git worktree add -q -b gone "$TEST_ROOT/elsewhere/gone"
+    rm -rf "$TEST_ROOT/elsewhere/gone"
+    run --separate-stderr bash -c '"$1" remove merged </dev/null' _ "$ZG"
+    [ "$status" -eq 0 ]
+    [[ "$stderr" == *"missing directory were not checked"* ]]
+}
+
+@test "zg remove merged --force with nothing merged exits 0 and keeps everything" {
+    make_repo_with_origin
+    git worktree add -q -b wip "$TEST_ROOT/elsewhere/wip"
+    ( cd "$TEST_ROOT/elsewhere/wip" && git commit -q --allow-empty -m wip )
+    run "$ZG" remove merged --force
+    [ "$status" -eq 0 ]
+    [ -d "$TEST_ROOT/elsewhere/wip" ]
+}
+
+@test "zg remove merged exits non-zero before prompting when the fetch fails" {
+    make_repo_with_origin
+    git worktree add -q -b done "$TEST_ROOT/elsewhere/done"
+    git remote set-url origin "$TEST_ROOT/does-not-exist"
+    # No input: the old order (prompt first) would print "Operation cancelled."
+    run bash -c '"$1" remove merged </dev/null' _ "$ZG"
+    [ "$status" -ne 0 ]
+    [[ "$output" != *"Operation cancelled."* ]]
+    [ -d "$TEST_ROOT/elsewhere/done" ]
+}
+
 @test "zg finalize exits non-zero and keeps worktree and branch when the prompt is declined" {
     make_repo
     git worktree add -q "$TEST_ROOT/elsewhere/ext" -b ext-branch
