@@ -301,8 +301,33 @@ zg_core_remove_merged() {
     local force="false"
     [[ "${1:-}" == "--force" ]] && force="true"
 
-    # One confirmation at the start when not forced
+    # Fresh remote info
+    zg_helpers_fetch_origin || return 1
+    local base="origin/$ZWEIG_DEFAULT_BRANCH"
+
+    local branches dirs i branch dir target target_real dir_real sm_status rc=0
+    # A worktree with a missing directory is only warned about (rc 2): there is
+    # nothing on disk to remove, and `zg prune metadata` cleans it up.
+    zg_helpers_load_worktrees branches dirs || rc=$?
+    [[ $rc -ne 1 ]] || return 1
+
+    # One confirmation when not forced, and only if something is merged: list
+    # the candidates first so a no-op run never prompts (or fails when declined).
     if [[ "$force" == "false" ]]; then
+        local candidates=()
+        for ((i = 0; i < ${#dirs[@]}; i++)); do
+            branch="${branches[i]}" dir="${dirs[i]}"
+            [[ -n "$branch" ]] || continue
+            zg_helpers_dir_is_protected "$branch" "$dir" && continue
+            git merge-base --is-ancestor "refs/heads/$branch" "$base" && candidates+=("$branch")
+        done
+        if [[ ${#candidates[@]} -eq 0 ]]; then
+            echo "No worktrees merged into $base; nothing to remove."
+            [[ $rc -ne 2 ]] || echo "⚠️ Worktrees with a missing directory were not checked (see warnings above)." >&2
+            return 0
+        fi
+        echo "Worktrees merged into $base (skipped at removal if they hold uncommitted work, a merge/rebase in progress, a submodule, or a name that resolves elsewhere):"
+        printf '  %s\n' "${candidates[@]}"
         if ! read -p "Remove ALL merged worktrees? (y/N): " -n 1 -r; then
             echo; echo "Operation cancelled."; return 1
         fi
@@ -310,18 +335,9 @@ zg_core_remove_merged() {
         [[ "$REPLY" =~ ^[Yy]$ ]] || { echo "Operation cancelled."; return 1; }
     fi
 
-    # Fresh remote info
-    zg_helpers_fetch_origin || return 1
-    local base="origin/$ZWEIG_DEFAULT_BRANCH"
-
     local removed=0 skipped=0 failed=0
 
     echo "🧹 Checking for worktrees merged into $base ..."
-    local branches dirs i branch dir target target_real dir_real sm_status rc=0
-    # A worktree with a missing directory is only warned about (rc 2): there is
-    # nothing on disk to remove, and `zg prune metadata` cleans it up.
-    zg_helpers_load_worktrees branches dirs || rc=$?
-    [[ $rc -ne 1 ]] || return 1
     for ((i = 0; i < ${#dirs[@]}; i++)); do
         branch="${branches[i]}" dir="${dirs[i]}"
 

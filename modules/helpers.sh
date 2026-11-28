@@ -500,6 +500,8 @@ Worktree Core Lifecycle:
   zg remove merged                  Remove worktrees whose branches are merged into the default branch,
                                      wherever they live on disk; detached ones, and ones with
                                      uncommitted work or a merge/rebase in progress, are skipped.
+                                     Lists the candidates and asks first (unless --force);
+                                     with nothing merged it says so and exits 0.
   zg (switch|cd) <worktree|branch>  Enter a worktree or switch to one by branch name.
                                      Finds worktrees anywhere on disk; detached ones
                                      only by their directory name under the worktree dir.

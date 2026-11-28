@@ -156,7 +156,7 @@ Here are some examples of conversational API usage:
   zg create -s my-feature
   ```
 
-- In scripts, `remove`, `remove merged`, `finalize`, `rebuild` and `prune trees` ask for confirmation unless given `--force`. Declining, or having no input to answer with, cancels the command with exit status 1, the same status as an error:
+- In scripts, `remove`, `remove merged`, `finalize`, `rebuild` and `prune trees` ask for confirmation unless given `--force`. `remove merged` lists the merged worktrees before asking, and when none are merged it says so and exits 0 without asking. Declining, or having no input to answer with, cancels the command with exit status 1, the same status as an error:
 
   ```bash
   zg remove my-feature --force   # no prompt
